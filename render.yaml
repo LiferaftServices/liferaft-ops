@@ -1,0 +1,22 @@
+# Render Blueprint for the TEST copy of Liferaft Services Operations.
+# The live copy will be a separate service pointed at a separate database.
+
+services:
+  - type: web
+    name: liferaft-ops-test
+    runtime: node
+    plan: free
+    region: virginia
+    branch: main
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run start
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # These two values identify the test database project. Both are public by
+      # design (the browser receives them) and neither is a secret.
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        value: https://wrafrzdxwktfqiudkxnv.supabase.co
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_N9O8vl1i5l1hYg6sEodM3w_H7F_Bsqk
