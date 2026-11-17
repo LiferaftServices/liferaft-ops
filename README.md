@@ -1,36 +1,45 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Liferaft Services Operations
 
-## Getting Started
+The service workflow system for Liferaft Services, LLC: customer tree, safety asset
+records, QR labels, workflow stages, routes and loaners. Billing, customer messages,
+inspections and parts forecasting follow in later stages.
 
-First, run the development server:
+The full design is in the blueprint document ("Liferaft Services Operations System:
+Blueprint"), with the stage 1 build plan in its second tab.
+
+## What is here so far (step 1, foundation)
+
+| Path | What it is |
+| --- | --- |
+| `supabase/migrations/0001_core.sql` | Database structure for every stage 1 record |
+| `supabase/migrations/0002_access.sql` | Access rules: signed-in, active staff only |
+| `src/lib/workflow.ts` | Every stage and every allowed move, used by screens and server alike |
+| `src/lib/system-id.ts` | The IDs printed on QR labels |
+| `tests/` | Checks for the workflow rules, the IDs and the database structure |
+| `src/app/` | The web app (a placeholder page for now) |
+
+## Running it
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm test          # workflow, ID and database checks
+npm run typecheck
+npm run lint
+npm run dev       # the app at http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The database tests apply the real migration files to an in-memory PostgreSQL, so no
+database account is needed to run them.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Technology
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Next.js and TypeScript for the app.
+- PostgreSQL for the data, hosted on Supabase, which also provides sign-in and file storage.
+- Render for hosting the app.
 
-## Learn More
+## Rules worth knowing before changing anything
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `job_events` is the permanent record. Rows cannot be edited or deleted.
+- An asset has one current owner and at most one open service job at a time.
+- A workflow move is only valid if `checkMove` in `src/lib/workflow.ts` allows it.
+- Training records are named with a `TRAINING` prefix and must never trigger customer contact.
