@@ -11,7 +11,7 @@ export default function Home() {
         </p>
         <h1 className="mt-1 text-3xl font-semibold">Operations system</h1>
         <p className="mt-3 text-zinc-600">
-          Foundation build. Sign-in, customers and asset records arrive in the next steps.
+          Foundation build. You are signed in as staff. Customers and asset records arrive in the next steps.
         </p>
       </header>
 
