@@ -33,6 +33,12 @@ export default async function QuickBooksSettings({
   const { data } = await supabase.rpc("qbo_connection_status");
   const status = Array.isArray(data) ? data[0] : undefined;
   const isAdmin = staff.role === "admin";
+  const { data: admins } = await supabase
+    .from("staff")
+    .select("full_name, email")
+    .eq("role", "admin")
+    .eq("active", true)
+    .order("full_name");
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-12">
@@ -106,6 +112,23 @@ export default async function QuickBooksSettings({
       ) : (
         <p>QuickBooks is not connected yet. An admin needs to connect it.</p>
       )}
+
+      <footer className="border-t border-zinc-500/40 pt-4 text-sm">
+        <h2 className="font-semibold">Need help?</h2>
+        <p className="mt-1">
+          If the connection or a QuickBooks action fails, contact a system administrator:
+        </p>
+        <ul className="mt-1">
+          {(admins ?? []).map((a) => (
+            <li key={a.email}>
+              {a.full_name},{" "}
+              <a className="underline" href={`mailto:${a.email}`}>
+                {a.email}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </footer>
     </main>
   );
 }
