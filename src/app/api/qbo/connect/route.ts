@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { missingQboSettings, qboConfig } from "@/lib/qbo/config";
-import { authorizeUrl } from "@/lib/qbo/oauth";
+import { authorizeUrl, getEndpoints } from "@/lib/qbo/oauth";
 
 const STATE_COOKIE = "qbo_oauth_state";
 
@@ -26,5 +26,5 @@ export async function GET() {
     path: "/api/qbo",
     maxAge: 600,
   });
-  return NextResponse.redirect(authorizeUrl(config, state));
+  return NextResponse.redirect(authorizeUrl(config, state, await getEndpoints(config)));
 }

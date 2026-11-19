@@ -21,6 +21,8 @@ export async function runCustomerSync(): Promise<ActionState> {
     revalidatePath("/customers");
     return { ok: true, message: `Copied ${count.toLocaleString("en-US")} customers from QuickBooks.` };
   } catch (err) {
+    // Refresh the page too: if the sign-in expired, it now shows the Connect button.
+    revalidatePath("/settings/quickbooks");
     return { ok: false, message: err instanceof Error ? err.message : "The sync failed." };
   }
 }

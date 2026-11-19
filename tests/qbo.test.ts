@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { apiBase, missingQboSettings, qboConfig } from "../src/lib/qbo/config";
 import { customerPageQuery, toCustomerRow } from "../src/lib/qbo/customers";
-import { authorizeUrl, toTokenSet } from "../src/lib/qbo/oauth";
+import { authorizeUrl, DEFAULT_ENDPOINTS, endpointsFromDiscovery, toTokenSet } from "../src/lib/qbo/oauth";
 
 const env = {
   QBO_CLIENT_ID: "client",
@@ -32,6 +32,18 @@ describe("QuickBooks sign-in", () => {
     expect(url.searchParams.get("state")).toBe("abc123");
     expect(url.searchParams.get("redirect_uri")).toBe(env.QBO_REDIRECT_URI);
     expect(url.toString()).not.toContain("secret");
+  });
+
+  it("takes endpoints from Intuit's discovery document, but only intuit.com addresses", () => {
+    const e = endpointsFromDiscovery({
+      authorization_endpoint: "https://appcenter.intuit.com/connect/oauth2/v2",
+      token_endpoint: "https://evil.example.test/token",
+      revocation_endpoint: "http://developer.api.intuit.com/revoke",
+    });
+    expect(e.authorize).toBe("https://appcenter.intuit.com/connect/oauth2/v2");
+    expect(e.token).toBe(DEFAULT_ENDPOINTS.token);
+    expect(e.revoke).toBe(DEFAULT_ENDPOINTS.revoke);
+    expect(endpointsFromDiscovery(null)).toEqual(DEFAULT_ENDPOINTS);
   });
 
   it("treats the access token as expiring a minute early", () => {
