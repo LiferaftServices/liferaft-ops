@@ -20,3 +20,16 @@ services:
         value: https://wrafrzdxwktfqiudkxnv.supabase.co
       - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
         value: sb_publishable_N9O8vl1i5l1hYg6sEodM3w_H7F_Bsqk
+      # QuickBooks connection. "sync: false" means the value is typed into Render's
+      # Environment tab and never stored in this file.
+      - key: QBO_ENVIRONMENT
+        value: sandbox
+      - key: QBO_CLIENT_ID
+        sync: false
+      - key: QBO_CLIENT_SECRET
+        sync: false
+      - key: QBO_REDIRECT_URI
+        sync: false
+      # The database's secret key (Supabase: Settings > API keys > Secret key).
+      - key: SUPABASE_SECRET_KEY
+        sync: false

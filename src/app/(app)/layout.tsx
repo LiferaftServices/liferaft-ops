@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireStaff } from "@/lib/auth";
 import { signOut } from "../login/actions";
 
@@ -10,9 +11,19 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   return (
     <>
       <header className="flex items-center justify-between border-b border-zinc-500/40 px-6 py-3">
-        <p className="font-semibold">
-          <span className="text-[#FF5200]">Liferaft Services</span> Operations
-        </p>
+        <div className="flex items-center gap-6">
+          <Link href="/" className="font-semibold">
+            <span className="text-[#FF5200]">Liferaft Services</span> Operations
+          </Link>
+          <nav className="flex gap-4 text-sm font-semibold">
+            <Link href="/customers" className="underline">
+              Customers
+            </Link>
+            <Link href="/settings/quickbooks" className="underline">
+              QuickBooks
+            </Link>
+          </nav>
+        </div>
         <form action={signOut} className="flex items-center gap-3 text-sm">
           <span>
             {staff.fullName} · {staff.role === "admin" ? "Admin" : "User"}

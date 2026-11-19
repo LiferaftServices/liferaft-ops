@@ -259,3 +259,40 @@ describe("QuickBooks links", () => {
     expect(await pick(withOwn)).toBe("Q-BUYER");
   });
 });
+
+describe("QuickBooks connection", () => {
+  it("hides the tokens from staff logins but lets them read the customer copy", async () => {
+    const staff = await one<{ id: string }>(
+      `insert into staff (id, full_name, email, role) values (gen_random_uuid(), 'TRAINING Staff', 'training-qbo@example.test', 'user') returning id`,
+    );
+    await db.query(
+      `insert into qbo_connection (environment, realm_id, access_token, access_expires_at, refresh_token)
+       values ('sandbox', '123', 'ACCESS', now(), 'REFRESH')`,
+    );
+    await db.query(
+      `insert into qbo_customers (qbo_id, display_name, fully_qualified_name) values ('1', 'TRAINING Co', 'TRAINING Co')`,
+    );
+    await db.exec(`grant usage on schema public to authenticated;
+      grant select, insert on qbo_connection, qbo_customers to authenticated;
+      grant execute on function qbo_connection_status() to authenticated;`);
+    await db.exec(`set role authenticated; set request.jwt.claim.sub = '${staff.id}';`);
+    try {
+      expect((await db.query(`select * from qbo_connection`)).rows).toHaveLength(0);
+      expect((await db.query(`select * from qbo_customers`)).rows).toHaveLength(1);
+      const status = await one<Record<string, unknown>>(`select * from qbo_connection_status()`);
+      expect(status.realm_id).toBe("123");
+      expect(Object.keys(status)).not.toContain("access_token");
+      await expect(
+        db.query(`insert into qbo_customers (qbo_id, display_name, fully_qualified_name) values ('2', 'x', 'x')`),
+      ).rejects.toThrow();
+    } finally {
+      await db.exec(`reset role; reset request.jwt.claim.sub;`);
+    }
+    await expect(
+      db.query(
+        `insert into qbo_connection (environment, realm_id, access_token, access_expires_at, refresh_token)
+         values ('sandbox', '456', 'A', now(), 'R')`,
+      ),
+    ).rejects.toThrow(); // only ever one connected company
+  });
+});
