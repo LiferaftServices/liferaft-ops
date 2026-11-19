@@ -215,7 +215,7 @@ describe("loaners", () => {
 });
 
 describe("QuickBooks links", () => {
-  it("posts an invoice to the most specific QuickBooks record that exists", async () => {
+  it("posts an invoice to the most specific QuickBooks record, and follows a sale", async () => {
     const acct = await one<{ id: string }>(
       `insert into customers (name, kind, qbo_customer_id) values ('TRAINING Fleet Two', 'fleet', 'Q-PARENT') returning id`,
     );
@@ -223,26 +223,39 @@ describe("QuickBooks links", () => {
       `insert into vessels (customer_id, name, qbo_customer_id) values ($1, 'TRAINING Lady', 'Q-VESSEL') returning id`,
       [acct.id],
     );
-    const withOwn = await one<{ id: string }>(
-      `insert into assets (system_id, asset_type, qbo_customer_id) values ($1, 'raft', 'Q-RAFT') returning id`,
-      [newSystemId()],
-    );
-    const onVessel = await one<{ id: string }>(
-      `insert into assets (system_id, asset_type) values ($1, 'raft') returning id`,
-      [newSystemId()],
-    );
-    const onAccount = await one<{ id: string }>(
-      `insert into assets (system_id, asset_type) values ($1, 'raft') returning id`,
-      [newSystemId()],
-    );
+    const mk = async () =>
+      (
+        await one<{ id: string }>(
+          `insert into assets (system_id, asset_type) values ($1, 'raft') returning id`,
+          [newSystemId()],
+        )
+      ).id;
+    const withOwn = await mk();
+    const onVessel = await mk();
+    const onAccount = await mk();
     await db.query(
-      `insert into asset_assignments (asset_id, customer_id, vessel_id) values ($1, $4, $5), ($2, $4, $5), ($3, $4, null)`,
-      [withOwn.id, onVessel.id, onAccount.id, acct.id, vessel.id],
+      `insert into asset_assignments (asset_id, customer_id, vessel_id, qbo_customer_id) values
+         ($1, $4, $5, 'Q-RAFT'), ($2, $4, $5, null), ($3, $4, null, null)`,
+      [withOwn, onVessel, onAccount, acct.id, vessel.id],
     );
     const pick = async (id: string) =>
       (await one<{ q: string }>(`select invoice_qbo_customer_id($1) as q`, [id])).q;
-    expect(await pick(withOwn.id)).toBe("Q-RAFT");
-    expect(await pick(onVessel.id)).toBe("Q-VESSEL");
-    expect(await pick(onAccount.id)).toBe("Q-PARENT");
+    expect(await pick(withOwn)).toBe("Q-RAFT");
+    expect(await pick(onVessel)).toBe("Q-VESSEL");
+    expect(await pick(onAccount)).toBe("Q-PARENT");
+
+    // The raft with its own QuickBooks record is sold to another customer.
+    const buyer = await one<{ id: string }>(
+      `insert into customers (name, qbo_customer_id) values ('TRAINING Second Owner', 'Q-BUYER') returning id`,
+    );
+    await db.query(
+      `update asset_assignments set effective_to = now() + interval '1 second' where asset_id = $1 and effective_to is null`,
+      [withOwn],
+    );
+    await db.query(
+      `insert into asset_assignments (asset_id, customer_id, effective_from, reason) values ($1, $2, now() + interval '1 second', 'Sold')`,
+      [withOwn, buyer.id],
+    );
+    expect(await pick(withOwn)).toBe("Q-BUYER");
   });
 });
