@@ -213,3 +213,36 @@ describe("loaners", () => {
     expect(row.n).toBe(2);
   });
 });
+
+describe("QuickBooks links", () => {
+  it("posts an invoice to the most specific QuickBooks record that exists", async () => {
+    const acct = await one<{ id: string }>(
+      `insert into customers (name, kind, qbo_customer_id) values ('TRAINING Fleet Two', 'fleet', 'Q-PARENT') returning id`,
+    );
+    const vessel = await one<{ id: string }>(
+      `insert into vessels (customer_id, name, qbo_customer_id) values ($1, 'TRAINING Lady', 'Q-VESSEL') returning id`,
+      [acct.id],
+    );
+    const withOwn = await one<{ id: string }>(
+      `insert into assets (system_id, asset_type, qbo_customer_id) values ($1, 'raft', 'Q-RAFT') returning id`,
+      [newSystemId()],
+    );
+    const onVessel = await one<{ id: string }>(
+      `insert into assets (system_id, asset_type) values ($1, 'raft') returning id`,
+      [newSystemId()],
+    );
+    const onAccount = await one<{ id: string }>(
+      `insert into assets (system_id, asset_type) values ($1, 'raft') returning id`,
+      [newSystemId()],
+    );
+    await db.query(
+      `insert into asset_assignments (asset_id, customer_id, vessel_id) values ($1, $4, $5), ($2, $4, $5), ($3, $4, null)`,
+      [withOwn.id, onVessel.id, onAccount.id, acct.id, vessel.id],
+    );
+    const pick = async (id: string) =>
+      (await one<{ q: string }>(`select invoice_qbo_customer_id($1) as q`, [id])).q;
+    expect(await pick(withOwn.id)).toBe("Q-RAFT");
+    expect(await pick(onVessel.id)).toBe("Q-VESSEL");
+    expect(await pick(onAccount.id)).toBe("Q-PARENT");
+  });
+});
