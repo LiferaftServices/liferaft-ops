@@ -96,6 +96,11 @@ export default async function QuickBooksSettings({
             ) : null}
           </section>
           <SyncButton />
+          {isAdmin ? (
+            <a href="/api/qbo/customers-export" className="w-fit text-sm font-semibold underline">
+              Download the customer copy (CSV)
+            </a>
+          ) : null}
           {isAdmin ? <DisconnectButton /> : null}
         </>
       ) : isAdmin ? (
