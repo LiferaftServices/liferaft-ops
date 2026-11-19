@@ -22,8 +22,9 @@ services:
         value: sb_publishable_N9O8vl1i5l1hYg6sEodM3w_H7F_Bsqk
       # QuickBooks connection. "sync: false" means the value is typed into Render's
       # Environment tab and never stored in this file.
+      # "production" = the real QuickBooks company. "sandbox" = Intuit's practice company.
       - key: QBO_ENVIRONMENT
-        value: sandbox
+        value: production
       - key: QBO_CLIENT_ID
         sync: false
       - key: QBO_CLIENT_SECRET
