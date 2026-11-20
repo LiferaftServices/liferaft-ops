@@ -297,3 +297,36 @@ export async function syncItems(): Promise<number> {
   if (error) throw new Error(`Could not remove stale items: ${error.message}`);
   return total;
 }
+
+export interface CreatedInvoice {
+  id: string;
+  docNumber: string | null;
+  total: number;
+  balance: number;
+}
+
+/**
+ * Creates an invoice in QuickBooks. This WRITES to QuickBooks: only call it after a
+ * person has approved. The request id makes a repeat of the same request return the
+ * invoice already created instead of making a second one.
+ */
+export async function createQboInvoice(payload: Record<string, unknown>, requestId: string): Promise<CreatedInvoice> {
+  const conn = await getConnection();
+  const res = (await qboFetch(conn, `invoice?requestid=${encodeURIComponent(requestId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })) as { Invoice: { Id: string; DocNumber?: string; TotalAmt?: number; Balance?: number } };
+  const inv = res.Invoice;
+  return { id: inv.Id, docNumber: inv.DocNumber ?? null, total: inv.TotalAmt ?? 0, balance: inv.Balance ?? inv.TotalAmt ?? 0 };
+}
+
+/** Reads an invoice's current total and open balance from QuickBooks. */
+export async function fetchQboInvoice(invoiceId: string): Promise<CreatedInvoice> {
+  const conn = await getConnection();
+  const res = (await qboFetch(conn, `invoice/${encodeURIComponent(invoiceId)}`)) as {
+    Invoice: { Id: string; DocNumber?: string; TotalAmt?: number; Balance?: number };
+  };
+  const inv = res.Invoice;
+  return { id: inv.Id, docNumber: inv.DocNumber ?? null, total: inv.TotalAmt ?? 0, balance: inv.Balance ?? 0 };
+}

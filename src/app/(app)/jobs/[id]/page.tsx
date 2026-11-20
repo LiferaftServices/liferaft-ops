@@ -5,7 +5,7 @@ import { formatDate, safeTerm } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { STAGE_LABELS, type Stage } from "@/lib/workflow";
 import { SERVICE_CLASS_LABELS } from "@/lib/raft-options";
-import { addItem, addStandard, setQuantity } from "./actions";
+import { acknowledgeHold, addItem, addStandard, checkPayment, createInvoice, setQuantity } from "./actions";
 import { PartScanner } from "./scanner";
 
 export const instant = false;
@@ -13,7 +13,7 @@ export const instant = false;
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
 export default async function JobPage({ params, searchParams }: PageProps<"/jobs/[id]">) {
-  await requireStaff();
+  const staff = await requireStaff();
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/.test(id)) notFound();
   const sp = await searchParams;
@@ -23,7 +23,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
   const supabase = await createClient();
   const { data: job } = await supabase
     .from("service_jobs")
-    .select("id, job_number, stage, asset_id, date_received, closed_at, qbo_invoice_id, notes")
+    .select("id, job_number, stage, asset_id, date_received, closed_at, qbo_invoice_id, qbo_invoice_number, invoice_total, invoice_balance, payment_status, payment_checked_at, payment_hold_override_by, payment_hold_override_note, notes")
     .eq("id", id)
     .maybeSingle();
   if (!job) notFound();
@@ -41,6 +41,13 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
       : Promise.resolve({ data: null }),
   ]);
   const open = !job.closed_at && !job.qbo_invoice_id;
+  const done = typeof sp.done === "string" ? sp.done : "";
+  const failed = typeof sp.error === "string" ? sp.error : "";
+  const { data: billId } = await supabase.rpc("invoice_qbo_customer_id", { p_asset_id: job.asset_id });
+  const { data: billTo } =
+    typeof billId === "string"
+      ? await supabase.from("qbo_customers").select("fully_qualified_name, active").eq("qbo_id", billId).maybeSingle()
+      : { data: null };
   const total = (lines ?? []).reduce((sum, l) => sum + Number(l.quantity) * Number(l.unit_price), 0);
 
   return (
@@ -66,6 +73,17 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
           Service board
         </Link>
       </p>
+
+      {done ? (
+        <p role="status" className="font-semibold">
+          {done}
+        </p>
+      ) : null}
+      {failed ? (
+        <p role="alert" className="font-semibold text-red-700">
+          {failed}
+        </p>
+      ) : null}
 
       <section>
         <h1 className="text-lg font-semibold">Parts used</h1>
@@ -141,6 +159,103 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
           </div>
         ) : null}
       </section>
+
+      {job.qbo_invoice_id ? (
+        <section className="rounded border border-[#FF5200] p-4 text-sm">
+          <h2 className="text-lg font-semibold">Invoice {job.qbo_invoice_number ?? ""}</h2>
+          <p className="mt-1">
+            Total {money(Number(job.invoice_total ?? 0))} ·{" "}
+            {job.payment_status === "paid" ? (
+              <span className="font-semibold">Paid</span>
+            ) : (
+              <span className="font-semibold text-red-700">Unpaid, {money(Number(job.invoice_balance ?? 0))} owing</span>
+            )}
+            {job.payment_checked_at ? ` · checked ${formatDate(job.payment_checked_at)}` : ""}
+          </p>
+          <p className="mt-2 flex flex-wrap items-center gap-4">
+            <a
+              className="font-semibold underline"
+              href={`https://qbo.intuit.com/app/invoice?txnId=${job.qbo_invoice_id}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open in QuickBooks
+            </a>
+          </p>
+          <form action={checkPayment} className="mt-2">
+            <input type="hidden" name="job_id" value={id} />
+            <button type="submit" className="rounded border border-zinc-500/60 px-3 py-1.5 font-semibold">
+              Check payment now
+            </button>
+          </form>
+          {job.payment_status !== "paid" ? (
+            job.payment_hold_override_by ? (
+              <p className="mt-3">
+                Payment hold acknowledged: {job.payment_hold_override_note}. This raft can be released unpaid.
+              </p>
+            ) : (
+              <div className="mt-3">
+                <p>This raft cannot be loaded, delivered or handed over until the invoice is paid.</p>
+                {staff.role === "admin" ? (
+                  <form action={acknowledgeHold} className="mt-2 flex flex-wrap items-end gap-2">
+                    <input type="hidden" name="job_id" value={id} />
+                    <label className="flex-1">
+                      Release it unpaid anyway? Say why
+                      <input name="note" required className="block w-full rounded border border-zinc-500/60 bg-transparent px-2 py-1" />
+                    </label>
+                    <button type="submit" className="rounded border border-zinc-500/60 px-3 py-1.5 font-semibold">
+                      Acknowledge and release
+                    </button>
+                  </form>
+                ) : (
+                  <p className="mt-1">An admin can acknowledge the hold if it needs to leave unpaid.</p>
+                )}
+              </div>
+            )
+          ) : null}
+        </section>
+      ) : job.stage === "needs_invoice" && !job.closed_at ? (
+        <section className="rounded border border-[#FF5200] p-4 text-sm">
+          <h2 className="text-lg font-semibold">Review and invoice</h2>
+          <p className="mt-1">
+            Bill to:{" "}
+            <span className="font-semibold">{billTo?.fully_qualified_name ?? "No QuickBooks customer linked"}</span>
+            {billTo && !billTo.active ? " (inactive in QuickBooks)" : ""}
+            {a?.vessel_name ? ` · vessel ${a.vessel_name}` : ""}
+          </p>
+          <p className="mt-1">
+            Check the parts list above against the work done. Correct quantities, add anything missing,
+            then approve. Sales tax is worked out by QuickBooks.
+          </p>
+          <form action={createInvoice} className="mt-3 flex flex-col gap-3">
+            <input type="hidden" name="job_id" value={id} />
+            <label className="w-fit">
+              Discount, percent (5 for the December Discount; blank for none)
+              <input
+                name="discount_percent"
+                inputMode="decimal"
+                className="block w-24 rounded border border-zinc-500/60 bg-transparent px-2 py-1"
+              />
+            </label>
+            <fieldset className="flex flex-wrap gap-4">
+              <legend className="font-semibold">After invoicing, the raft will be</legend>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="outcome" value="delivery" required /> Delivered by us
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="outcome" value="pickup" required /> Collected by the customer
+              </label>
+            </fieldset>
+            <label className="flex items-center gap-2 font-semibold">
+              <input type="checkbox" name="reviewed" required /> I have reviewed the parts list and it is correct
+            </label>
+            <button type="submit" className="w-fit rounded bg-[#FF5200] px-4 py-2 font-semibold text-white">
+              Approve and create invoice in QuickBooks
+            </button>
+            <p className="opacity-75">This creates a real invoice in QuickBooks. It is not emailed to the customer.</p>
+          </form>
+        </section>
+      ) : null}
 
       {open ? (
         <>

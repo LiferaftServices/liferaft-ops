@@ -34,6 +34,9 @@ interface Job {
   is_loaner: boolean;
   scheduled_start: string | null;
   scheduled_due: string | null;
+  qbo_invoice_id: string | null;
+  qbo_invoice_number: string | null;
+  invoice_balance: number | null;
 }
 
 const SORTS = [
@@ -279,6 +282,15 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
                           </span>
                         ) : null}
                         {j.estimate_status === "required" ? <span className="ml-2 font-semibold">Estimate wanted</span> : null}
+                        {j.qbo_invoice_id ? (
+                          j.payment_status === "paid" ? (
+                            <span className="ml-2 font-semibold">Paid</span>
+                          ) : (
+                            <span className="ml-2 font-semibold text-red-700">
+                              Unpaid{j.payment_hold_acknowledged ? " (release approved)" : ""}
+                            </span>
+                          )
+                        ) : null}
                       </p>
                       <p>
                         {j.customer_name ?? "No owner"}

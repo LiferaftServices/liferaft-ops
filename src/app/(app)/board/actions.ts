@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireStaff } from "@/lib/auth";
 import { getMode, MODE_COOKIE, MODES } from "@/lib/mode";
+import { refreshPayment } from "@/lib/payments";
 import { createClient } from "@/lib/supabase/server";
 import { checkMove, type Stage } from "@/lib/workflow";
 
@@ -37,6 +38,13 @@ export async function moveJob(form: FormData) {
   if (!UUID.test(jobId)) redirect(back);
 
   const supabase = await createClient();
+  // Before a raft leaves, ask QuickBooks whether its invoice has been paid since we last looked.
+  if (["load", "deliver", "customer_collects"].includes(actionKey)) {
+    await refreshPayment(supabase, jobId).catch(() => null);
+  }
+  if (actionKey === "invoice_for_delivery" || actionKey === "invoice_for_pickup") {
+    redirect(`/jobs/${jobId}`); // invoices are approved on the job page, where the parts list is reviewed
+  }
   const { data: job } = await supabase.from("job_board").select("*").eq("id", jobId).maybeSingle();
   if (!job) redirect(`${back}${join}error=${encodeURIComponent("That job is closed or no longer exists.")}`);
 
