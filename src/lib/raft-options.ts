@@ -14,6 +14,7 @@ export const EQUIPMENT_TYPES = [
 
 export const BRANDS = [
   "Crewsaver",
+  "Crewsaver Rec.",
   "Elliot",
   "Revere (3Si)",
   "Revere Rec.",
@@ -26,6 +27,7 @@ export const BRANDS = [
   "Ocean Safety",
   "Datrex",
   "DBC",
+  "DSB",
   "Viking",
   "Winslow",
   "Switlik",

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { requireStaff } from "@/lib/auth";
 import { DUE_LABELS, dueState, formatDate, isoDay, safeTerm } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
-import { EQUIPMENT_TYPES, PRIORITY_LABELS, SERVICE_CLASS_LABELS } from "@/lib/raft-options";
+import { BRANDS, EQUIPMENT_TYPES, PRIORITY_LABELS, SERVICE_CLASS_LABELS } from "@/lib/raft-options";
 import { STAGE_LABELS } from "@/lib/workflow";
 import { changeOwner, checkIn, moveVessel, updateRaft } from "./actions";
 
@@ -252,8 +252,14 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
             <input name="serial_number" defaultValue={a.serial_number ?? ""} required className={INPUT} />
           </label>
           <label>
-            Brand
-            <input name="brand" defaultValue={a.brand ?? ""} className={INPUT} />
+            Brand (decides the certificate item)
+            <select name="brand" defaultValue={a.brand ?? ""} className={INPUT}>
+              <option value="">Not set</option>
+              {BRANDS.map((b) => (
+                <option key={b}>{b}</option>
+              ))}
+              {a.brand && !(BRANDS as readonly string[]).includes(a.brand) ? <option>{a.brand}</option> : null}
+            </select>
           </label>
           <label>
             Model

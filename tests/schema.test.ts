@@ -515,3 +515,47 @@ describe("standard service line", () => {
     }
   });
 });
+
+describe("certificate line", () => {
+  it("goes on commercial rafts by exact brand, and never on recreational ones", async () => {
+    const staff = await one<{ id: string }>(
+      `insert into staff (id, full_name, email, role) values (gen_random_uuid(), 'TRAINING Cert', 'training-cert@example.test', 'user') returning id`,
+    );
+    const c = await one<{ id: string }>(`insert into customers (name) values ('TRAINING Cert Owner') returning id`);
+    await db.query(
+      `insert into qbo_items (qbo_id, name, fully_qualified_name, unit_price, active) values
+       ('C1', '40-99999RFD', 'Certificates:40-99999RFD', 195, true),
+       ('C2', '40-99999REV', 'Certificates:40-99999REV', 195, true),
+       ('C3', 'OSL9810', 'Certificates:OSL9810', 153, true)`,
+    );
+    await db.exec(`set request.jwt.claim.sub = '${staff.id}';`);
+    try {
+      let n = 0;
+      const cert = async (brand: string, type: string) => {
+        n += 1;
+        const raft = (
+          await db.query<{ id: string }>(
+            `select register_raft($1, null, $2, $3, $4, null, 5, $5, null, 12, $6) as id`,
+            [c.id, newSystemId(), `TRN-CERT-${n}`, brand, type, ids.york],
+          )
+        ).rows[0].id;
+        const job = (
+          await db.query<{ id: string }>(`select check_in_asset($1, $2, 'normal', false, null, null, null, null) as id`, [raft, ids.york])
+        ).rows[0].id;
+        return (
+          await db.query<{ part_number: string }>(`select part_number from job_lines where job_id = $1 and source = 'certificate'`, [job])
+        ).rows.map((r) => r.part_number);
+      };
+      expect(await cert("RFD", "SOLAS A")).toEqual(["40-99999RFD"]);
+      expect(await cert("RFD Revere", "SOLAS B")).toEqual(["40-99999REV"]);
+      expect(await cert("Revere (3Si)", "Coastal")).toEqual(["OSL9810"]);
+      // Brand must match exactly: plain "Revere" is not settled, so nothing is added.
+      expect(await cert("Revere", "SOLAS A")).toEqual([]);
+      // Recreational rafts never get one, by type or by brand name.
+      expect(await cert("Revere (3Si)", "Rec Offshore")).toEqual([]);
+      expect(await cert("Revere Rec.", "Coastal")).toEqual([]);
+    } finally {
+      await db.exec(`reset request.jwt.claim.sub;`);
+    }
+  });
+});

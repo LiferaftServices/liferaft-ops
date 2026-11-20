@@ -87,6 +87,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
                   <td className="py-2 pr-4">
                     <span className="font-semibold">{l.part_number}</span>
                     {l.source === "standard" ? <span className="ml-2 text-xs opacity-75">standard service</span> : null}
+                    {l.source === "certificate" ? <span className="ml-2 text-xs opacity-75">certificate</span> : null}
                     {l.description ? <span className="block opacity-75">{l.description}</span> : null}
                   </td>
                   <td className="py-2 pr-4">
@@ -134,7 +135,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
             <form action={addStandard} className="mt-2">
               <input type="hidden" name="job_id" value={id} />
               <button type="submit" className="rounded border border-zinc-500/60 px-3 py-1.5 font-semibold">
-                Add standard service line
+                Add standard service and certificate lines
               </button>
             </form>
           </div>
