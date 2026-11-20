@@ -345,7 +345,12 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
                       </details>
                     </div>
                     <div className="flex flex-wrap justify-end gap-2">
-                      {actions.map((a) => (
+                      {actions.some((a) => a.key.startsWith("invoice_for_")) ? (
+                        <Link href={`/jobs/${j.id}`} className="rounded bg-[#FF5200] px-3 py-1.5 font-semibold text-white">
+                          Review invoice items
+                        </Link>
+                      ) : null}
+                      {actions.filter((a) => !a.key.startsWith("invoice_for_")).map((a) => (
                         <form key={a.key} action={moveJob}>
                           <input type="hidden" name="job_id" value={j.id} />
                           <input type="hidden" name="action" value={a.key} />
