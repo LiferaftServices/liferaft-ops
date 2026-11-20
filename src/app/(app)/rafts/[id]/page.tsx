@@ -125,6 +125,11 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
           </Link>
         </p>
         <h1 className="mt-1 text-2xl font-semibold">{a.serial_number ?? "No serial"}</h1>
+        <p className="mt-1 text-sm">
+          <Link className="underline" href={`/rafts/${id}/label`}>
+            Print QR label
+          </Link>
+        </p>
         <p className="mt-1">
           {a.customer_qbo_id ? (
             <Link className="underline" href={`/customers/${a.customer_qbo_id}`}>
