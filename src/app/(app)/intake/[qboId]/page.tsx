@@ -181,6 +181,14 @@ export default async function IntakeCustomer({ params, searchParams }: PageProps
               Dropped off by
               <input name="dropped_off_by" autoComplete="off" className={INPUT} />
             </label>
+            <label>
+              Scheduled start (optional)
+              <input type="date" name="scheduled_start" className={INPUT} />
+            </label>
+            <label>
+              Scheduled due (optional)
+              <input type="date" name="scheduled_due" className={INPUT} />
+            </label>
             <label className="flex items-center gap-2 sm:col-span-2">
               <input type="checkbox" name="estimate_required" /> Customer wants an estimate before work starts
             </label>

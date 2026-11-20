@@ -119,6 +119,17 @@ export async function changeOwner(form: FormData) {
   back(id, "done", "Owner updated. The previous owner is kept in the ownership history.");
 }
 
+/** Saves planned dates on a job that was just opened. Returns a message if they could not be saved. */
+async function saveSchedule(db: Awaited<ReturnType<typeof createClient>>, jobId: string, form: FormData): Promise<string | null> {
+  const start = String(form.get("scheduled_start") ?? "");
+  const due = String(form.get("scheduled_due") ?? "");
+  if (!start && !due) return null;
+  const ok = (d: string) => !d || /^\d{4}-\d{2}-\d{2}$/.test(d);
+  if (!ok(start) || !ok(due) || (start && due && due < start)) return "the schedule dates were not valid, so they were left blank";
+  const { error } = await db.from("service_jobs").update({ scheduled_start: start || null, scheduled_due: due || null }).eq("id", jobId);
+  return error ? "the schedule dates could not be saved" : null;
+}
+
 const PRIORITIES = ["hot", "normal", "seasonal", "scheduled", "winter_storage"];
 
 /** Opens a service job for a raft that is already on file. */
@@ -133,7 +144,7 @@ export async function checkIn(form: FormData) {
   if (!PRIORITIES.includes(priority)) back(id, "error", "Choose a priority.");
   if (received && !/^\d{4}-\d{2}-\d{2}$/.test(received)) back(id, "error", "The received date was not understood.");
   const supabase = await createClient();
-  const { error } = await supabase.rpc("check_in_asset", {
+  const { data: jobId, error } = await supabase.rpc("check_in_asset", {
     p_asset: id,
     p_location: location,
     p_priority: priority,
@@ -144,6 +155,7 @@ export async function checkIn(form: FormData) {
     p_notes: text(form, "notes"),
   });
   if (error) back(id, "error", error.message);
+  const scheduleProblem = await saveSchedule(supabase, jobId as string, form);
   revalidatePath(`/rafts/${id}`);
-  back(id, "done", "Checked in. A service job is open at Received.");
+  back(id, "done", `Checked in. A service job is open at Received${scheduleProblem ? `, but ${scheduleProblem}` : ""}.`);
 }

@@ -60,7 +60,7 @@ export async function registerRaft(form: FormData) {
     assetId = data as string;
 
     if (form.get("check_in") === "on") {
-      const { error: jobError } = await supabase.rpc("check_in_asset", {
+      const { data: jobId, error: jobError } = await supabase.rpc("check_in_asset", {
         p_asset: assetId,
         p_location: location,
         p_priority: priority,
@@ -74,6 +74,15 @@ export async function registerRaft(form: FormData) {
         redirect(
           `/rafts/${assetId}?error=${encodeURIComponent(`The raft was registered, but check-in failed: ${jobError.message}`)}`,
         );
+      }
+      const start = text(form, "scheduled_start");
+      const due = text(form, "scheduled_due");
+      const valid = (d: string) => !d || /^\d{4}-\d{2}-\d{2}$/.test(d);
+      if ((start || due) && valid(start) && valid(due) && !(start && due && due < start)) {
+        await supabase
+          .from("service_jobs")
+          .update({ scheduled_start: start || null, scheduled_due: due || null })
+          .eq("id", jobId as string);
       }
     }
   } catch (err) {

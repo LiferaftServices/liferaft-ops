@@ -71,3 +71,62 @@ export async function moveJob(form: FormData) {
   revalidatePath(`/rafts/${job.asset_id}`);
   redirect(`${back}${join}done=${encodeURIComponent(`${job.job_number} moved.`)}`);
 }
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function safeBack(form: FormData): { back: string; join: string } {
+  const raw = String(form.get("back") ?? "/board");
+  const back = raw.startsWith("/") && !raw.startsWith("//") ? raw : "/board";
+  return { back, join: back.includes("?") ? "&" : "?" };
+}
+
+/** Sets or clears a job's planned start and due dates. */
+export async function setSchedule(form: FormData) {
+  await requireStaff();
+  const { back, join } = safeBack(form);
+  const jobId = String(form.get("job_id") ?? "");
+  const start = String(form.get("scheduled_start") ?? "");
+  const due = String(form.get("scheduled_due") ?? "");
+  if (!UUID.test(jobId)) redirect(back);
+  if ((start && !DATE.test(start)) || (due && !DATE.test(due))) {
+    redirect(`${back}${join}error=${encodeURIComponent("A date was not understood.")}`);
+  }
+  if (start && due && due < start) {
+    redirect(`${back}${join}error=${encodeURIComponent("The due date cannot be before the start date.")}`);
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("service_jobs")
+    .update({ scheduled_start: start || null, scheduled_due: due || null })
+    .eq("id", jobId)
+    .is("closed_at", null);
+  if (error) redirect(`${back}${join}error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/board");
+  redirect(`${back}${join}done=${encodeURIComponent("Schedule saved.")}`);
+}
+
+/** Sets the turnaround a shop is quoting. Admins only. */
+export async function setTurnaround(form: FormData) {
+  const staff = await requireStaff();
+  const { back, join } = safeBack(form);
+  if (staff.role !== "admin") {
+    redirect(`${back}${join}error=${encodeURIComponent("Only an admin can set the turnaround.")}`);
+  }
+  const location = String(form.get("location_id") ?? "");
+  const days = String(form.get("days") ?? "").trim();
+  if (!UUID.test(location) || (days && !/^\d{1,3}$/.test(days))) {
+    redirect(`${back}${join}error=${encodeURIComponent("Enter the turnaround as a number of days.")}`);
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("locations")
+    .update({
+      turnaround_days: days ? Number(days) : null,
+      turnaround_set_at: new Date().toISOString(),
+      turnaround_set_by: staff.id,
+    })
+    .eq("id", location);
+  if (error) redirect(`${back}${join}error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/board");
+  redirect(`${back}${join}done=${encodeURIComponent("Turnaround updated.")}`);
+}

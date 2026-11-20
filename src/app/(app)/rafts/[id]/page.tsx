@@ -215,6 +215,14 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
               Dropped off by
               <input name="dropped_off_by" className={INPUT} />
             </label>
+            <label>
+              Scheduled start (optional)
+              <input type="date" name="scheduled_start" className={INPUT} />
+            </label>
+            <label>
+              Scheduled due (optional)
+              <input type="date" name="scheduled_due" className={INPUT} />
+            </label>
             <label className="flex items-center gap-2">
               <input type="checkbox" name="estimate_required" /> Estimate wanted before work starts
             </label>
