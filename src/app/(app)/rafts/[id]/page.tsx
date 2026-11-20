@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaff } from "@/lib/auth";
-import { DUE_LABELS, dueState, formatDate, safeTerm } from "@/lib/format";
+import { DUE_LABELS, dueState, formatDate, isoDay, safeTerm } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
-import { changeOwner, moveVessel, updateRaft } from "./actions";
+import { PRIORITY_LABELS } from "@/lib/raft-options";
+import { STAGE_LABELS } from "@/lib/workflow";
+import { changeOwner, checkIn, moveVessel, updateRaft } from "./actions";
 
 export const instant = false;
 
@@ -42,6 +44,23 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
       .order("serviced_on", { ascending: false }),
   ]);
   if (!a) notFound();
+
+  const [{ data: job }, { data: locations }] = await Promise.all([
+    supabase
+      .from("service_jobs")
+      .select("job_number, stage, priority, date_received, locations(name)")
+      .eq("asset_id", id)
+      .is("closed_at", null)
+      .maybeSingle(),
+    supabase.from("locations").select("id, name").order("name"),
+  ]);
+  const openJob = job as unknown as {
+    job_number: string;
+    stage: keyof typeof STAGE_LABELS;
+    priority: string;
+    date_received: string | null;
+    locations: { name: string } | null;
+  } | null;
 
   // Vessels on the owner's account, for the "move" list, and customer matches for "change owner".
   let accountId: string | null = a.customer_id;
@@ -142,6 +161,68 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
             </div>
           ))}
       </dl>
+
+      {openJob ? (
+        <section className="rounded border border-[#FF5200] p-4 text-sm">
+          <h2 className="font-semibold">In for service: {openJob.job_number}</h2>
+          <p className="mt-1">
+            {STAGE_LABELS[openJob.stage]} · {openJob.locations?.name ?? ""} · received{" "}
+            {formatDate(openJob.date_received)} · {PRIORITY_LABELS[openJob.priority] ?? openJob.priority}
+          </p>
+        </section>
+      ) : (
+        <details open={sp.checkin === "1"} className="rounded border border-zinc-500/40 p-4 text-sm">
+          <summary className="cursor-pointer font-semibold">Check in for service</summary>
+          <form action={checkIn} className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <input type="hidden" name="id" value={a.id} />
+            <label>
+              Shop
+              <select name="location_id" required defaultValue="" className={INPUT}>
+                <option value="" disabled>
+                  Choose…
+                </option>
+                {(locations ?? []).map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Date received
+              <input type="date" name="date_received" defaultValue={isoDay()} max={isoDay()} className={INPUT} />
+            </label>
+            <label>
+              Priority
+              <select name="priority" defaultValue="normal" className={INPUT}>
+                {Object.entries(PRIORITY_LABELS).map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Pickup location / how it arrived
+              <input name="pickup_location" placeholder="York drop off" className={INPUT} />
+            </label>
+            <label>
+              Dropped off by
+              <input name="dropped_off_by" className={INPUT} />
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" name="estimate_required" /> Estimate wanted before work starts
+            </label>
+            <label className="sm:col-span-2">
+              Notes / additional equipment
+              <textarea name="notes" rows={3} className={INPUT} />
+            </label>
+            <button type="submit" className={`${BUTTON} sm:col-span-2`}>
+              Check in
+            </button>
+          </form>
+        </details>
+      )}
 
       <details className="rounded border border-zinc-500/40 p-4 text-sm">
         <summary className="cursor-pointer font-semibold">Edit details</summary>

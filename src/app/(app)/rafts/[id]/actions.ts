@@ -3,12 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireStaff } from "@/lib/auth";
+import { findOrCreateVessel, resolveOwner, topAccount } from "@/lib/customers";
 import { createClient } from "@/lib/supabase/server";
 
-type Db = Awaited<ReturnType<typeof createClient>>;
-
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const VESSEL_PREFIX = /^\s*(f\/v|m\/v|s\/v|t\/v|r\/v|p\/v|s\/y|m\/y|tug|yacht)[\s.:/-]+/i;
 
 const text = (form: FormData, key: string) => String(form.get(key) ?? "").trim();
 const orNull = (value: string) => (value ? value : null);
@@ -58,59 +56,6 @@ export async function updateRaft(form: FormData) {
   back(id, "done", "Details saved.");
 }
 
-/** The local customer record for a QuickBooks customer, created (with its parents) if needed. */
-async function ensureCustomer(db: Db, qboId: string, depth = 0): Promise<string> {
-  const existing = await db.from("customers").select("id").eq("qbo_customer_id", qboId).maybeSingle();
-  if (existing.data) return existing.data.id;
-  const { data: q } = await db
-    .from("qbo_customers")
-    .select("qbo_id, parent_qbo_id, display_name, fully_qualified_name, company_name, phone, mobile, email, active")
-    .eq("qbo_id", qboId)
-    .maybeSingle();
-  if (!q) throw new Error("That customer is not in the QuickBooks copy. Copy customers again and retry.");
-  if (!q.active) throw new Error("That QuickBooks customer is inactive or was merged into another record.");
-  const parentId = q.parent_qbo_id && depth < 5 ? await ensureCustomer(db, q.parent_qbo_id, depth + 1) : null;
-  const { data, error } = await db
-    .from("customers")
-    .insert({
-      qbo_customer_id: q.qbo_id,
-      qbo_full_name: q.fully_qualified_name,
-      parent_id: parentId,
-      name: q.display_name,
-      kind: q.company_name ? "company" : "individual",
-      phone: q.phone ?? q.mobile,
-      email: q.email,
-    })
-    .select("id")
-    .single();
-  if (error) throw new Error(error.message);
-  return data.id;
-}
-
-/** The top-level account above a customer: vessels are always kept there. */
-async function topAccount(db: Db, customerId: string): Promise<string> {
-  let id = customerId;
-  for (let i = 0; i < 6; i += 1) {
-    const { data } = await db.from("customers").select("parent_id").eq("id", id).maybeSingle();
-    if (!data?.parent_id) return id;
-    id = data.parent_id;
-  }
-  return id;
-}
-
-/** "F/V Reel Action", "Reel Action" and "reel  action" are the same vessel. */
-const vesselKey = (name: string) => name.replace(VESSEL_PREFIX, "").toLowerCase().replace(/[^a-z0-9]/g, "");
-
-async function findOrCreateVessel(db: Db, accountId: string, name: string): Promise<string> {
-  const { data: existing } = await db.from("vessels").select("id, name").eq("customer_id", accountId).limit(1000);
-  const key = vesselKey(name);
-  const match = key ? (existing ?? []).find((v) => vesselKey(v.name) === key) : undefined;
-  if (match) return match.id;
-  const { data, error } = await db.from("vessels").insert({ customer_id: accountId, name }).select("id").single();
-  if (error) throw new Error(error.message);
-  return data.id;
-}
-
 /** Moves a raft to another vessel of the same owner (or to no vessel). */
 export async function moveVessel(form: FormData) {
   await requireStaff();
@@ -153,42 +98,9 @@ export async function changeOwner(form: FormData) {
   if (!/^\d+$/.test(qboId)) back(id, "error", "Choose a customer from the search results.");
   const supabase = await createClient();
   try {
-    // If the chosen QuickBooks record is really a vessel under a customer, treat it as one.
-    const { data: asVessel } = await supabase
-      .from("vessels")
-      .select("id, customer_id")
-      .eq("qbo_customer_id", qboId)
-      .maybeSingle();
-    let customerId: string;
-    let vesselId: string | null = null;
-    if (asVessel) {
-      customerId = asVessel.customer_id;
-      vesselId = asVessel.id;
-    } else {
-      const { data: q } = await supabase
-        .from("qbo_customers")
-        .select("display_name, fully_qualified_name, parent_qbo_id")
-        .eq("qbo_id", qboId)
-        .maybeSingle();
-      if (q?.parent_qbo_id && VESSEL_PREFIX.test(q.display_name)) {
-        customerId = await ensureCustomer(supabase, q.parent_qbo_id);
-        const account = await topAccount(supabase, customerId);
-        const { data: v, error } = await supabase
-          .from("vessels")
-          .insert({
-            customer_id: account,
-            name: q.display_name,
-            qbo_customer_id: qboId,
-            qbo_full_name: q.fully_qualified_name,
-          })
-          .select("id")
-          .single();
-        if (error) throw new Error(error.message);
-        vesselId = v.id;
-      } else {
-        customerId = await ensureCustomer(supabase, qboId);
-      }
-    }
+    const owner = await resolveOwner(supabase, qboId);
+    const customerId = owner.customerId;
+    let vesselId = owner.vesselId;
     const typed = text(form, "new_vessel");
     if (typed) vesselId = await findOrCreateVessel(supabase, await topAccount(supabase, customerId), typed);
     const { error } = await supabase.rpc("reassign_asset", {
@@ -203,4 +115,33 @@ export async function changeOwner(form: FormData) {
   }
   revalidatePath(`/rafts/${id}`);
   back(id, "done", "Owner updated. The previous owner is kept in the ownership history.");
+}
+
+const PRIORITIES = ["hot", "normal", "seasonal", "scheduled", "winter_storage"];
+
+/** Opens a service job for a raft that is already on file. */
+export async function checkIn(form: FormData) {
+  await requireStaff();
+  const id = text(form, "id");
+  if (!UUID.test(id)) redirect("/rafts");
+  const location = text(form, "location_id");
+  const priority = text(form, "priority");
+  const received = text(form, "date_received");
+  if (!UUID.test(location)) back(id, "error", "Choose the shop.");
+  if (!PRIORITIES.includes(priority)) back(id, "error", "Choose a priority.");
+  if (received && !/^\d{4}-\d{2}-\d{2}$/.test(received)) back(id, "error", "The received date was not understood.");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("check_in_asset", {
+    p_asset: id,
+    p_location: location,
+    p_priority: priority,
+    p_estimate_required: form.get("estimate_required") === "on",
+    p_pickup_location: text(form, "pickup_location"),
+    p_dropped_off_by: text(form, "dropped_off_by"),
+    p_date_received: received || null,
+    p_notes: text(form, "notes"),
+  });
+  if (error) back(id, "error", error.message);
+  revalidatePath(`/rafts/${id}`);
+  back(id, "done", "Checked in. A service job is open at Received.");
 }

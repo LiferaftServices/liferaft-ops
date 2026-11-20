@@ -113,4 +113,32 @@ describe("QuickBooks API errors", () => {
     ).rejects.toBeInstanceOf(QboReconnectError);
     expect(calls.some((c) => c.table === "qbo_connection" && c.op === "delete")).toBe(true);
   });
+
+  it("creates a customer in QuickBooks and adds it to the local copy", async () => {
+    let sent: Record<string, unknown> = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string | URL, init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body));
+        return reply(200, { Customer: { Id: "9001", DisplayName: "TRAINING, Pat", Active: true } });
+      }),
+    );
+    const { createQboCustomer } = await import("../src/lib/qbo/client");
+    const id = await createQboCustomer({ displayName: "TRAINING, Pat", givenName: "Pat", familyName: "TRAINING", phone: "207-555-0100" });
+    expect(id).toBe("9001");
+    expect(sent).toMatchObject({ DisplayName: "TRAINING, Pat", PrimaryPhone: { FreeFormNumber: "207-555-0100" } });
+    expect(sent).not.toHaveProperty("BillAddr");
+    const saved = calls.find((c) => c.table === "qbo_customers" && c.op === "upsert");
+    expect(JSON.stringify(saved?.payload)).toContain("9001");
+  });
+
+  it("reports a duplicate name plainly and saves nothing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => reply(400, fault("ValidationFault", "6240", "Duplicate Name Exists Error"))),
+    );
+    const { createQboCustomer, QboDuplicateNameError } = await import("../src/lib/qbo/client");
+    await expect(createQboCustomer({ displayName: "TRAINING, Pat" })).rejects.toBeInstanceOf(QboDuplicateNameError);
+    expect(calls.some((c) => c.op === "upsert")).toBe(false);
+  });
 });

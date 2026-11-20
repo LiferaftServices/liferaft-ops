@@ -341,3 +341,45 @@ describe("reassigning an asset", () => {
     await expect(db.query(`select reassign_asset($1, $2, null, 'x')`, [asset.id, a.id])).rejects.toThrow(/Only staff/);
   });
 });
+
+describe("intake", () => {
+  it("finds a raft however its serial was typed, registers a new one once, and checks it in once", async () => {
+    const staff = await one<{ id: string }>(
+      `insert into staff (id, full_name, email, role) values (gen_random_uuid(), 'TRAINING Intake', 'training-intake@example.test', 'user') returning id`,
+    );
+    const c = await one<{ id: string }>(`insert into customers (name) values ('TRAINING Intake Owner') returning id`);
+    expect((await one<{ k: string }>(`select serial_key(' s9083-a0 ') as k`)).k).toBe("59083A0");
+    await db.exec(`set request.jwt.claim.sub = '${staff.id}';`);
+    try {
+      const reg = (serial: string) =>
+        db.query<{ id: string }>(
+          `select register_raft($1, null, $2, $3, 'TRAINING', 'Coastal', 4, 'Coastal', '2020-01-31', 12, $4) as id`,
+          [c.id, newSystemId(), serial, ids.york],
+        );
+      const raft = (await reg("TRN-S9083")).rows[0].id;
+      await expect(reg("trn 59083")).rejects.toThrow(/already on record/);
+      const found = (await db.query<{ id: string }>(`select id from find_assets_by_serial('TRN59O83')`)).rows;
+      expect(found.map((r) => r.id)).toEqual([raft]);
+
+      const checkIn = () =>
+        db.query<{ id: string }>(
+          `select check_in_asset($1, $2, 'normal', true, 'York drop off', 'TRAINING Person', null, 'TRAINING note') as id`,
+          [raft, ids.york],
+        );
+      const job = (await checkIn()).rows[0].id;
+      await expect(checkIn()).rejects.toThrow(/already has an open service job/);
+      const j = await one<{ stage: string; estimate_status: string; billing_customer_id: string; job_number: string }>(
+        `select stage, estimate_status, billing_customer_id, job_number from service_jobs where id = $1`,
+        [job],
+      );
+      expect(j).toMatchObject({ stage: "received", estimate_status: "required", billing_customer_id: c.id });
+      expect(j.job_number).toMatch(/^SVC-\d+$/);
+      const events = (
+        await db.query<{ action: string }>(`select action from job_events where asset_id = $1 order by id`, [raft])
+      ).rows.map((r) => r.action);
+      expect(events).toEqual(["asset_registered", "checked_in"]);
+    } finally {
+      await db.exec(`reset request.jwt.claim.sub;`);
+    }
+  });
+});

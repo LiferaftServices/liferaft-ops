@@ -184,3 +184,64 @@ export async function syncCustomers(): Promise<number> {
     throw err;
   }
 }
+
+export interface NewCustomerInput {
+  displayName: string;
+  givenName?: string;
+  familyName?: string;
+  companyName?: string;
+  phone?: string;
+  email?: string;
+  addressLine?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+}
+
+export class QboDuplicateNameError extends Error {
+  constructor() {
+    super("QuickBooks already has a customer, vendor or employee with exactly this name.");
+  }
+}
+
+/**
+ * Creates a customer in QuickBooks and adds it to the local copy.
+ * This WRITES to QuickBooks: only call it after a person has confirmed.
+ */
+export async function createQboCustomer(input: NewCustomerInput): Promise<string> {
+  const conn = await getConnection();
+  const body: Record<string, unknown> = { DisplayName: input.displayName };
+  if (input.givenName) body.GivenName = input.givenName;
+  if (input.familyName) body.FamilyName = input.familyName;
+  if (input.companyName) body.CompanyName = input.companyName;
+  if (input.phone) body.PrimaryPhone = { FreeFormNumber: input.phone };
+  if (input.email) body.PrimaryEmailAddr = { Address: input.email };
+  if (input.addressLine || input.city || input.state || input.postalCode) {
+    body.BillAddr = {
+      Line1: input.addressLine,
+      City: input.city,
+      CountrySubDivisionCode: input.state,
+      PostalCode: input.postalCode,
+    };
+  }
+  let created: QboCustomer;
+  try {
+    const res = (await qboFetch(conn, "customer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })) as { Customer: QboCustomer };
+    created = res.Customer;
+  } catch (err) {
+    // 6240 is QuickBooks' code for "duplicate name exists".
+    if (err instanceof Error && /"code":"6240"|Duplicate Name Exists/i.test(err.message)) {
+      throw new QboDuplicateNameError();
+    }
+    throw err;
+  }
+  const { error } = await createAdminClient()
+    .from("qbo_customers")
+    .upsert(toCustomerRow(created), { onConflict: "qbo_id" });
+  if (error) throw new Error(`Created in QuickBooks, but the local copy failed: ${error.message}`);
+  return created.Id;
+}
