@@ -5,7 +5,9 @@ import { formatDate, safeTerm } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { STAGE_LABELS, type Stage } from "@/lib/workflow";
 import { SERVICE_CLASS_LABELS } from "@/lib/raft-options";
+import { DiscountRows } from "./discounts";
 import { acknowledgeHold, addItem, addStandard, checkPayment, createAdditionalInvoice, createInvoice, setQuantity } from "./actions";
+import { discountItems } from "@/lib/discounts";
 import { PartScanner } from "./scanner";
 
 export const instant = false;
@@ -50,6 +52,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
         .order("created_at")
     : { data: null };
   const waiting = invoiced ? (lines ?? []).filter((l) => !l.invoice_id) : [];
+  const discounts = !job.closed_at ? (await discountItems(supabase)).map(({ qbo_id, name, description }) => ({ qbo_id, name, description })) : [];
   const waitingTotal = waiting.reduce((sum, l) => sum + Number(l.quantity) * Number(l.unit_price), 0);
   const done = typeof sp.done === "string" ? sp.done : "";
   const failed = typeof sp.error === "string" ? sp.error : "";
@@ -260,14 +263,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
           </p>
           <form action={createInvoice} className="mt-3 flex flex-col gap-3">
             <input type="hidden" name="job_id" value={id} />
-            <label className="w-fit">
-              Discount, percent (5 for the December Discount; blank for none)
-              <input
-                name="discount_percent"
-                inputMode="decimal"
-                className="block w-24 rounded border border-zinc-500/60 bg-transparent px-2 py-1"
-              />
-            </label>
+            <DiscountRows items={discounts} subtotal={total} />
             <fieldset className="flex flex-wrap gap-4">
               <legend className="font-semibold">After invoicing, the raft will be</legend>
               <label className="flex items-center gap-2">
@@ -298,6 +294,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
           </p>
           <form action={createAdditionalInvoice} className="mt-3 flex flex-col gap-3">
             <input type="hidden" name="job_id" value={id} />
+            <DiscountRows items={discounts} subtotal={waitingTotal} />
             <label className="flex items-center gap-2 font-semibold">
               <input type="checkbox" name="reviewed" required /> I have reviewed the added items and they are correct
             </label>

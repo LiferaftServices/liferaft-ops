@@ -34,7 +34,8 @@ describe("service invoice", () => {
 
   it("adds the subtotal note and the discount line the way they are done today", () => {
     const inv = buildInvoice({
-      qboCustomerId: "36250", date: "2026-11-20", lines, discountPercent: 5, subtotalItemId: "10649", discountItemId: "9579",
+      qboCustomerId: "36250", date: "2026-11-20", lines, subtotalItemId: "10649",
+      discounts: [{ qboItemId: "9579", description: "Service Discount", amount: discountAmount(lines, 5), taxable: true }],
     }) as { Line: { Amount: number; Description?: string; SalesItemLineDetail: { ItemRef: { value: string }; TaxCodeRef: { value: string } } }[] };
     expect(inv.Line).toHaveLength(10);
     expect(inv.Line[8]).toMatchObject({ Amount: 0, Description: "Subtotal: $905.36" });
@@ -43,8 +44,23 @@ describe("service invoice", () => {
     expect(Math.round(total * 100) / 100).toBe(860.09);
   });
 
-  it("refuses a discount when the discount items are missing, and an empty invoice", () => {
-    expect(() => buildInvoice({ qboCustomerId: "1", date: "2026-11-20", lines, discountPercent: 5 })).toThrow(/discount/);
+  it("takes several discounts, each on its own item", () => {
+    const inv = buildInvoice({
+      qboCustomerId: "1", date: "2026-11-20", lines, subtotalItemId: "10649",
+      discounts: [
+        { qboItemId: "111", description: "Service Discount 26", amount: 90.54, taxable: true },
+        { qboItemId: "9579", description: "Service Discount", amount: 45.27, taxable: true },
+      ],
+    }) as { Line: { Amount: number; Description?: string; SalesItemLineDetail: { ItemRef: { value: string } } }[] };
+    expect(inv.Line).toHaveLength(11);
+    expect(inv.Line[9]).toMatchObject({ Amount: -90.54, Description: "Service Discount 26", SalesItemLineDetail: { ItemRef: { value: "111" } } });
+    expect(inv.Line[10]).toMatchObject({ Amount: -45.27 });
+  });
+
+  it("refuses discounts of zero or more than the invoice, and an empty invoice", () => {
+    const d = (amount: number) => [{ qboItemId: "9579", description: "Service Discount", amount, taxable: true }];
+    expect(() => buildInvoice({ qboCustomerId: "1", date: "2026-11-20", lines, discounts: d(0) })).toThrow(/above zero/);
+    expect(() => buildInvoice({ qboCustomerId: "1", date: "2026-11-20", lines, discounts: d(906) })).toThrow(/more than/);
     expect(() => buildInvoice({ qboCustomerId: "1", date: "2026-11-20", lines: [] })).toThrow(/at least one line/);
   });
 });

@@ -6,6 +6,7 @@ import { requireStaff } from "@/lib/auth";
 import { getMode } from "@/lib/mode";
 import { refreshPayment } from "@/lib/payments";
 import { createQboInvoice } from "@/lib/qbo/client";
+import { discountItems } from "@/lib/discounts";
 import { buildInvoice } from "@/lib/qbo/invoice";
 import { createClient } from "@/lib/supabase/server";
 
@@ -143,6 +144,25 @@ export async function addStandard(form: FormData) {
   revalidatePath(`/jobs/${jobId}`);
 }
 
+/** Reads the discount rows of an invoice form and checks each against the QuickBooks discount items. */
+async function readDiscounts(db: Db, form: FormData) {
+  const ids = form.getAll("discount_item").map(String);
+  const amounts = form.getAll("discount_amount").map((a) => Number(String(a).replace(/[$,\s]/g, "")));
+  const none = { discounts: [], subtotalItemId: null as string | null };
+  if (!ids.length) return { ...none, problem: null };
+  if (ids.length !== amounts.length) return { ...none, problem: "The discount rows were incomplete. Try again." };
+  const items = await discountItems(db);
+  const discounts = [];
+  for (let i = 0; i < ids.length; i++) {
+    const item = items.find((x) => x.qbo_id === ids[i]);
+    if (!item) return { ...none, problem: "Choose a discount item for each discount row." };
+    if (!(amounts[i] > 0)) return { ...none, problem: `Enter a dollar amount above zero for ${item.name}.` };
+    discounts.push({ qboItemId: item.qbo_id, description: item.description || item.name, amount: amounts[i], taxable: item.taxable });
+  }
+  const { data: sub } = await db.from("qbo_items").select("qbo_id").eq("active", true).eq("name", "Services").limit(1);
+  return { discounts, subtotalItemId: sub?.[0]?.qbo_id ?? null, problem: null };
+}
+
 const jobUrl = (id: string, kind: "done" | "error", message: string) =>
   `/jobs/${id}?${kind}=${encodeURIComponent(message)}`;
 
@@ -160,9 +180,6 @@ export async function createInvoice(form: FormData) {
   if (form.get("reviewed") !== "on") fail("Tick the box to confirm you have reviewed the parts list.");
   const outcome = String(form.get("outcome") ?? "");
   if (outcome !== "delivery" && outcome !== "pickup") fail("Choose whether the raft will be delivered or collected.");
-  const percentText = String(form.get("discount_percent") ?? "").trim();
-  const percent = percentText ? Number(percentText) : 0;
-  if (!(percent >= 0 && percent <= 100)) fail("The discount must be between 0 and 100 percent.");
 
   const supabase = await createClient();
   const { data: job } = await supabase
@@ -191,17 +208,8 @@ export async function createInvoice(form: FormData) {
     fail("The QuickBooks customer for this raft is inactive or was merged. Copy customers again, then fix the owner.");
   }
 
-  let subtotalItemId: string | null = null;
-  let discountItemId: string | null = null;
-  if (percent > 0) {
-    const { data: special } = await supabase
-      .from("qbo_items")
-      .select("qbo_id, name")
-      .eq("active", true)
-      .in("name", ["SERVICE DISCOUNT", "Services"]);
-    discountItemId = special?.find((i) => i.name === "SERVICE DISCOUNT")?.qbo_id ?? null;
-    subtotalItemId = special?.find((i) => i.name === "Services")?.qbo_id ?? null;
-  }
+  const { discounts, subtotalItemId, problem } = await readDiscounts(supabase, form);
+  if (problem) fail(problem);
 
   let payload: Record<string, unknown>;
   try {
@@ -218,9 +226,8 @@ export async function createInvoice(form: FormData) {
       vesselName: asset?.vessel_name,
       privateNote: `Liferaft Ops ${job!.job_number}, raft serial ${asset?.serial_number ?? "unknown"}`,
       billEmail: billTo!.email,
-      discountPercent: percent,
+      discounts,
       subtotalItemId,
-      discountItemId,
     });
   } catch (err) {
     fail(err instanceof Error ? err.message : "The invoice could not be prepared.");
@@ -264,7 +271,6 @@ export async function createInvoice(form: FormData) {
       invoice_balance: created!.balance,
       payment_status: created!.balance > 0 ? "unpaid" : "paid",
       payment_checked_at: new Date().toISOString(),
-      discount_percent: percent || null,
     })
     .eq("id", jobId);
   if (saveError || rowError || !invoiceRow) {
@@ -334,7 +340,11 @@ export async function createAdditionalInvoice(form: FormData) {
     fail("The QuickBooks customer for this raft is inactive or was merged. Copy customers again, then fix the owner.");
   }
 
-  const payload = buildInvoice({
+  const extra = await readDiscounts(supabase, form);
+  if (extra.problem) fail(extra.problem);
+  let payload: Record<string, unknown>;
+  try {
+    payload = buildInvoice({
     qboCustomerId,
     date: new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }),
     lines: lines!.map((l) => ({
@@ -347,7 +357,12 @@ export async function createAdditionalInvoice(form: FormData) {
     vesselName: asset?.vessel_name,
     privateNote: `Liferaft Ops ${job!.job_number}, raft serial ${asset?.serial_number ?? "unknown"}. Items added after invoice ${job!.qbo_invoice_number ?? job!.qbo_invoice_id}.`,
     billEmail: billTo!.email,
-  });
+    discounts: extra.discounts,
+    subtotalItemId: extra.subtotalItemId,
+    });
+  } catch (err) {
+    fail(err instanceof Error ? err.message : "The invoice could not be prepared.");
+  }
 
   const { data: claimed, error: claimError } = await supabase.rpc("claim_job_for_additional_invoice", { p_job: jobId });
   if (claimError || !claimed) fail("Someone else is invoicing this job right now. Refresh the page in a moment.");
@@ -355,7 +370,7 @@ export async function createAdditionalInvoice(form: FormData) {
   let created;
   try {
     // Tied to the first waiting line, so a retry of the same items cannot make a second invoice.
-    created = await createQboInvoice(payload, `lo-x-${lines![0].id}`);
+    created = await createQboInvoice(payload!, `lo-x-${lines![0].id}`);
   } catch (err) {
     await supabase.from("service_jobs").update({ extra_invoice_claimed_at: null }).eq("id", jobId);
     fail(`QuickBooks did not create the invoice: ${err instanceof Error ? err.message : "unknown error"}`);
