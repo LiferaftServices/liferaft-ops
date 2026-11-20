@@ -36,12 +36,17 @@ export function PartScanner({ jobId }: { jobId: string }) {
   const video = useRef<HTMLVideoElement>(null);
   const form = useRef<HTMLFormElement>(null);
   const codeInput = useRef<HTMLInputElement>(null);
+  const intentInput = useRef<HTMLInputElement>(null);
+  const showing = useRef(""); // the label currently shown for confirmation
   const last = useRef<{ code: string; at: number }>({ code: "", at: 0 });
   const busy = useRef(false);
 
   useEffect(() => {
     busy.current = pending;
   }, [pending]);
+  useEffect(() => {
+    showing.current = state.candidate?.code ?? state.unknownCode ?? "";
+  }, [state]);
 
   useEffect(() => {
     if (!scanning) return;
@@ -63,9 +68,12 @@ export function PartScanner({ jobId }: { jobId: string }) {
 
     const accept = (text: string | undefined | null) => {
       const now = Date.now();
+      // A label already on screen waiting for an answer is not read again while it stays in view.
+      if (text && text === showing.current) return;
       if (text && !busy.current && (text !== last.current.code || now - last.current.at > REPEAT_GAP_MS)) {
         last.current = { code: text, at: now };
-        if (codeInput.current && form.current) {
+        if (codeInput.current && form.current && intentInput.current) {
+          intentInput.current.value = "scan";
           codeInput.current.value = text;
           navigator.vibrate?.(60);
           form.current.requestSubmit();
@@ -144,6 +152,7 @@ export function PartScanner({ jobId }: { jobId: string }) {
         </button>
         <form ref={form} action={action} className="flex flex-1 gap-2">
           <input type="hidden" name="job_id" value={jobId} />
+          <input ref={intentInput} type="hidden" name="intent" defaultValue="typed" />
           <input
             ref={codeInput}
             name="code"
@@ -152,7 +161,14 @@ export function PartScanner({ jobId }: { jobId: string }) {
             autoComplete="off"
             className="w-full min-w-40 rounded border border-zinc-500/60 bg-transparent px-3 py-2"
           />
-          <button type="submit" disabled={pending} className="rounded border border-zinc-500/60 px-3 py-2">
+          <button
+            type="submit"
+            disabled={pending}
+            onClick={() => {
+              if (intentInput.current) intentInput.current.value = "typed";
+            }}
+            className="rounded border border-zinc-500/60 px-3 py-2"
+          >
             Add
           </button>
         </form>
@@ -164,6 +180,41 @@ export function PartScanner({ jobId }: { jobId: string }) {
         <p role="alert" className="text-red-700">
           {cameraError}
         </p>
+      ) : null}
+      {state.candidate ? (
+        <form action={action} className="rounded border-2 border-[#FF5200] p-3">
+          <input type="hidden" name="job_id" value={jobId} />
+          <input type="hidden" name="intent" value="confirm" />
+          <input type="hidden" name="item_id" value={state.candidate.itemId} />
+          <input type="hidden" name="item_name" value={state.candidate.name} />
+          <p className="opacity-75">Scanned label {state.candidate.code}</p>
+          <p className="text-lg font-semibold">{state.candidate.name}</p>
+          {state.candidate.description ? <p>{state.candidate.description}</p> : null}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2">
+              Qty
+              <input
+                name="quantity"
+                inputMode="decimal"
+                defaultValue={1}
+                className="w-16 rounded border border-zinc-500/60 bg-transparent px-2 py-1.5"
+              />
+            </label>
+            <button type="submit" disabled={pending} className="rounded bg-[#FF5200] px-5 py-2 font-semibold text-white">
+              Add this part
+            </button>
+            <button
+              type="submit"
+              name="intent"
+              value="dismiss"
+              formNoValidate
+              disabled={pending}
+              className="rounded border border-zinc-500/60 px-4 py-2"
+            >
+              Not this one
+            </button>
+          </div>
+        </form>
       ) : null}
       {state.message ? (
         <p role="status" className={state.ok ? "text-base font-semibold" : "text-base font-semibold text-red-700"}>

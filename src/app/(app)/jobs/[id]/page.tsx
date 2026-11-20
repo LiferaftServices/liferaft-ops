@@ -327,8 +327,12 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
           <section>
             <h2 className="text-lg font-semibold">Find a part</h2>
             {learn ? (
-              <p className="mt-1 text-sm font-semibold">
-                The part you add next will be remembered for the label that was just scanned.
+              <p className="mt-1 rounded border-2 border-[#FF5200] p-3 text-sm">
+                Scanned label <span className="text-base font-semibold">{learn}</span> is not recognised yet. The part
+                you add next will be remembered for this label, so check it is the label you meant to scan.{" "}
+                <Link className="underline" href={`/jobs/${id}`}>
+                  Wrong label, start over
+                </Link>
               </p>
             ) : null}
             <form id="part-search" className="mt-2 flex gap-2">

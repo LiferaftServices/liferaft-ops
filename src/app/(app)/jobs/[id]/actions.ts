@@ -16,6 +16,8 @@ export interface PartState {
   message: string | null;
   /** A scanned code the system did not recognise, waiting for someone to pick its part. */
   unknownCode: string | null;
+  /** A scanned label that was recognised and is waiting for the person to confirm it. */
+  candidate?: { code: string; itemId: string; name: string; description: string | null } | null;
 }
 
 type Db = Awaited<ReturnType<typeof createClient>>;
@@ -24,7 +26,7 @@ type Db = Awaited<ReturnType<typeof createClient>>;
 async function itemForPartNumber(db: Db, partNumber: string) {
   const { data } = await db
     .from("qbo_items")
-    .select("qbo_id, name, fully_qualified_name")
+    .select("qbo_id, name, fully_qualified_name, description")
     .eq("active", true)
     .ilike("name", partNumber.replace(/[%_\\]/g, (c) => `\\${c}`))
     .limit(10);
@@ -32,26 +34,57 @@ async function itemForPartNumber(db: Db, partNumber: string) {
   return rows.find((r) => r.fully_qualified_name.toLowerCase().startsWith("service parts:")) ?? rows[0] ?? null;
 }
 
-/** Adds a part from a scanned label or a typed part number. */
+/**
+ * Handles the scan box. A camera scan is only looked up and shown back, so the person can
+ * see which label was read before anything is added; the part is added when they confirm.
+ * A typed code is added straight away, since they pressed Add themselves.
+ */
 export async function addByCode(_prev: PartState, form: FormData): Promise<PartState> {
   await requireStaff();
   const jobId = String(form.get("job_id") ?? "");
-  const code = String(form.get("code") ?? "").trim().slice(0, 120);
-  if (!UUID.test(jobId) || !code) return { ok: false, message: "Nothing was scanned.", unknownCode: null };
-
+  // The confirm box sends "confirm" and, when Not this one is pressed, "dismiss" as well.
+  const intents = form.getAll("intent").map(String);
+  const intent = intents.includes("dismiss") ? "dismiss" : (intents[0] ?? "typed");
+  if (!UUID.test(jobId)) return { ok: false, message: "Nothing was scanned.", unknownCode: null };
   const supabase = await createClient();
+
+  if (intent === "dismiss") return { ok: true, message: null, unknownCode: null };
+
+  if (intent === "confirm") {
+    const itemId = String(form.get("item_id") ?? "");
+    const name = String(form.get("item_name") ?? "").slice(0, 120);
+    const quantity = Number(String(form.get("quantity") ?? "1"));
+    if (!/^\d+$/.test(itemId) || !(quantity > 0 && quantity <= 9999)) {
+      return { ok: false, message: "Enter a quantity above zero.", unknownCode: null };
+    }
+    const { error } = await supabase.rpc("add_job_line", { p_job: jobId, p_item: itemId, p_quantity: quantity, p_source: "scan" });
+    if (error) return { ok: false, message: error.message, unknownCode: null };
+    revalidatePath(`/jobs/${jobId}`);
+    return { ok: true, message: `Added ${quantity} × ${name}.`, unknownCode: null };
+  }
+
+  const code = String(form.get("code") ?? "").trim().slice(0, 120);
+  if (!code) return { ok: false, message: "Nothing was scanned.", unknownCode: null };
   const { data: known } = await supabase.from("part_codes").select("part_number").eq("code", code).maybeSingle();
   const item = await itemForPartNumber(supabase, known?.part_number ?? code);
   if (!item) {
     return {
       ok: false,
       message: known
-        ? `That label is part ${known.part_number}, which is not an active item in QuickBooks.`
-        : "That label is not recognised yet. Find the part below and add it; the label will be remembered.",
+        ? `Scanned ${code}: that label is part ${known.part_number}, which is not an active item in QuickBooks.`
+        : `Scanned ${code}: this label is not recognised yet. Find its part below and add it; the label will be remembered.`,
       unknownCode: known ? null : code,
     };
   }
-  const { error } = await supabase.rpc("add_job_line", { p_job: jobId, p_item: item.qbo_id, p_quantity: 1, p_source: "scan" });
+  if (intent === "scan") {
+    return {
+      ok: true,
+      message: null,
+      unknownCode: null,
+      candidate: { code, itemId: item.qbo_id, name: item.name, description: item.description },
+    };
+  }
+  const { error } = await supabase.rpc("add_job_line", { p_job: jobId, p_item: item.qbo_id, p_quantity: 1, p_source: "manual" });
   if (error) return { ok: false, message: error.message, unknownCode: null };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true, message: `Added ${item.name}.`, unknownCode: null };
