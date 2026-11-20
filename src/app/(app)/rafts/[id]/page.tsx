@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { requireStaff } from "@/lib/auth";
 import { DUE_LABELS, dueState, formatDate, isoDay, safeTerm } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
-import { PRIORITY_LABELS } from "@/lib/raft-options";
+import { EQUIPMENT_TYPES, PRIORITY_LABELS, SERVICE_CLASS_LABELS } from "@/lib/raft-options";
 import { STAGE_LABELS } from "@/lib/workflow";
 import { changeOwner, checkIn, moveVessel, updateRaft } from "./actions";
 
@@ -91,6 +91,7 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
     ["Model", a.model ?? ""],
     ["Capacity", a.capacity ? `${a.capacity}-person` : ""],
     ["Type", a.equipment_type ?? ""],
+    ["Service class", a.service_class ? SERVICE_CLASS_LABELS[a.service_class] : "Not set"],
     ["Manufactured", formatDate(a.manufacture_date)],
     ["Service interval", a.service_interval_months ? `${a.service_interval_months} months` : ""],
     ["Last service", formatDate(a.last_serviced_on)],
@@ -264,7 +265,26 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
           </label>
           <label>
             Type
-            <input name="equipment_type" defaultValue={a.equipment_type ?? ""} className={INPUT} />
+            <select name="equipment_type" defaultValue={a.equipment_type ?? ""} className={INPUT}>
+              <option value="">Not set</option>
+              {EQUIPMENT_TYPES.map((t) => (
+                <option key={t}>{t}</option>
+              ))}
+              {a.equipment_type && !(EQUIPMENT_TYPES as readonly string[]).includes(a.equipment_type) ? (
+                <option>{a.equipment_type}</option>
+              ) : null}
+            </select>
+          </label>
+          <label>
+            Service class (decides the labor item)
+            <select name="service_class" defaultValue={a.service_class ?? ""} className={INPUT}>
+              <option value="">Not set</option>
+              {Object.entries(SERVICE_CLASS_LABELS).map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             Manufactured

@@ -4,7 +4,8 @@ import { requireStaff } from "@/lib/auth";
 import { formatDate, safeTerm } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { STAGE_LABELS, type Stage } from "@/lib/workflow";
-import { addItem, setQuantity } from "./actions";
+import { SERVICE_CLASS_LABELS } from "@/lib/raft-options";
+import { addItem, addStandard, setQuantity } from "./actions";
 import { PartScanner } from "./scanner";
 
 export const instant = false;
@@ -27,7 +28,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
     .maybeSingle();
   if (!job) notFound();
   const [{ data: a }, { data: lines }, { data: items }] = await Promise.all([
-    supabase.from("asset_overview").select("serial_number, brand, capacity, equipment_type, customer_name, vessel_name").eq("id", job.asset_id).maybeSingle(),
+    supabase.from("asset_overview").select("serial_number, brand, capacity, equipment_type, customer_name, vessel_name, service_class").eq("id", job.asset_id).maybeSingle(),
     supabase.from("job_lines").select("id, part_number, description, quantity, unit_price, source").eq("job_id", id).order("created_at"),
     q
       ? supabase
@@ -85,6 +86,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
                 <tr key={l.id} className="border-b border-zinc-500/20 align-top">
                   <td className="py-2 pr-4">
                     <span className="font-semibold">{l.part_number}</span>
+                    {l.source === "standard" ? <span className="ml-2 text-xs opacity-75">standard service</span> : null}
                     {l.description ? <span className="block opacity-75">{l.description}</span> : null}
                   </td>
                   <td className="py-2 pr-4">
@@ -121,6 +123,22 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
           </table>
         )}
         {open ? <p className="mt-1 text-sm opacity-75">Set a quantity to 0 to remove a part.</p> : null}
+        {open && !(lines ?? []).some((l) => l.source === "standard") ? (
+          <div className="mt-3 rounded border border-zinc-500/40 p-3 text-sm">
+            <p>
+              No standard service line on this job.{" "}
+              {a?.service_class && a?.capacity
+                ? `This raft is ${SERVICE_CLASS_LABELS[a.service_class]}, ${a.capacity}-person. If nothing is added, there is no labor item for that combination: add one from Find a part.`
+                : "The raft needs a service class and a capacity first (set them on the raft page), or add the labor item from Find a part."}
+            </p>
+            <form action={addStandard} className="mt-2">
+              <input type="hidden" name="job_id" value={id} />
+              <button type="submit" className="rounded border border-zinc-500/60 px-3 py-1.5 font-semibold">
+                Add standard service line
+              </button>
+            </form>
+          </div>
+        ) : null}
       </section>
 
       {open ? (

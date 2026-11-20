@@ -468,3 +468,50 @@ describe("parts on a job", () => {
     }
   });
 });
+
+describe("standard service line", () => {
+  it("is added at check-in from the raft's class and capacity, and only when there is an exact rule", async () => {
+    const staff = await one<{ id: string }>(
+      `insert into staff (id, full_name, email, role) values (gen_random_uuid(), 'TRAINING Labor', 'training-labor@example.test', 'user') returning id`,
+    );
+    const c = await one<{ id: string }>(`insert into customers (name) values ('TRAINING Labor Owner') returning id`);
+    await db.query(
+      `insert into qbo_items (qbo_id, name, fully_qualified_name, unit_price, active) values
+       ('L1', '6PRAFTSERVICE', 'Raft Service Labor:6PRAFTSERVICE', 565, true),
+       ('L2', '4P-CSTL-SRVC', 'Raft Service Labor:4P-CSTL-SRVC', 545, true)`,
+    );
+    await db.exec(`set request.jwt.claim.sub = '${staff.id}';`);
+    try {
+      const make = async (serial: string, type: string, capacity: number) => {
+        const raft = (
+          await db.query<{ id: string }>(
+            `select register_raft($1, null, $2, $3, 'TRAINING', null, $4, $5, null, 12, $6) as id`,
+            [c.id, newSystemId(), serial, capacity, type, ids.york],
+          )
+        ).rows[0].id;
+        const job = (
+          await db.query<{ id: string }>(`select check_in_asset($1, $2, 'normal', false, null, null, null, null) as id`, [raft, ids.york])
+        ).rows[0].id;
+        const cls = (await one<{ service_class: string | null }>(`select service_class from assets where id = $1`, [raft])).service_class;
+        const lines = (await db.query<{ part_number: string; source: string }>(`select part_number, source from job_lines where job_id = $1`, [job])).rows;
+        return { job, cls, lines };
+      };
+      const solas = await make("TRN-LABOR-1", "SOLAS A", 6);
+      expect(solas.cls).toBe("raft");
+      expect(solas.lines).toEqual([{ part_number: "6PRAFTSERVICE", source: "standard" }]);
+      const coastal = await make("TRN-LABOR-2", "Coastal", 4);
+      expect(coastal.lines.map((l) => l.part_number)).toEqual(["4P-CSTL-SRVC"]);
+      // A 9-person raft has no rule: nothing is guessed.
+      expect((await make("TRN-LABOR-3", "SOLAS B", 9)).lines).toEqual([]);
+      // Recreational coastal has no settled class yet.
+      const rec = await make("TRN-LABOR-4", "Rec Coastal", 4);
+      expect(rec.cls).toBeNull();
+      expect(rec.lines).toEqual([]);
+      // Asking again never doubles the line.
+      await db.query(`select add_standard_service_line($1)`, [solas.job]);
+      expect((await one<{ n: number }>(`select count(*)::int n from job_lines where job_id = $1`, [solas.job])).n).toBe(1);
+    } finally {
+      await db.exec(`reset request.jwt.claim.sub;`);
+    }
+  });
+});

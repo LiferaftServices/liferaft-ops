@@ -48,3 +48,5 @@ export function isRecreational(equipmentType: string, brand: string): boolean {
 
 export const serviceIntervalMonths = (equipmentType: string, brand: string) =>
   isRecreational(equipmentType, brand) ? 36 : 12;
+
+export const SERVICE_CLASS_LABELS: Record<string, string> = { raft: "Raft", iba: "IBA", coastal: "Coastal" };

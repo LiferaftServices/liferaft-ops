@@ -87,3 +87,13 @@ export async function setQuantity(form: FormData) {
   }
   revalidatePath(`/jobs/${jobId}`);
 }
+
+/** Adds the standard service (labor) line for this raft's class and capacity, if there is a rule. */
+export async function addStandard(form: FormData) {
+  await requireStaff();
+  const jobId = String(form.get("job_id") ?? "");
+  if (!UUID.test(jobId)) return;
+  const supabase = await createClient();
+  await supabase.rpc("add_standard_service_line", { p_job: jobId });
+  revalidatePath(`/jobs/${jobId}`);
+}

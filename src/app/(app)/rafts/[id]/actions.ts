@@ -43,6 +43,7 @@ export async function updateRaft(form: FormData) {
       model: orNull(text(form, "model")),
       capacity: capacity ? Number(capacity) : null,
       equipment_type: orNull(text(form, "equipment_type")),
+      service_class: ["raft", "iba", "coastal"].includes(text(form, "service_class")) ? text(form, "service_class") : null,
       manufacture_date: orNull(text(form, "manufacture_date")),
       service_interval_months: interval ? Number(interval) : null,
       next_service_due: orNull(text(form, "next_service_due")),
