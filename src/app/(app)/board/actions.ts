@@ -114,14 +114,20 @@ export async function setTurnaround(form: FormData) {
   }
   const location = String(form.get("location_id") ?? "");
   const days = String(form.get("days") ?? "").trim();
-  if (!UUID.test(location) || (days && !/^\d{1,3}$/.test(days))) {
-    redirect(`${back}${join}error=${encodeURIComponent("Enter the turnaround as a number of days.")}`);
+  const num = (key: string) => String(form.get(key) ?? "").trim();
+  const fields = [days, num("batch_size"), num("batch_days"), num("handoff_days")];
+  if (!UUID.test(location) || fields.some((v) => v && !/^\d{1,3}$/.test(v))) {
+    redirect(`${back}${join}error=${encodeURIComponent("Enter whole numbers only.")}`);
   }
+  const orNull = (v: string) => (v ? Number(v) : null);
   const supabase = await createClient();
   const { error } = await supabase
     .from("locations")
     .update({
-      turnaround_days: days ? Number(days) : null,
+      turnaround_days: orNull(days),
+      batch_size: orNull(num("batch_size")) || null,
+      batch_days: orNull(num("batch_days")) || null,
+      handoff_days: orNull(num("handoff_days")),
       turnaround_set_at: new Date().toISOString(),
       turnaround_set_by: staff.id,
     })

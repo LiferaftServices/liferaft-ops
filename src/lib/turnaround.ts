@@ -28,3 +28,25 @@ export function measuredTurnaround(jobs: Completed[], minimum = 10): { days: num
   const median = waits.length % 2 ? waits[mid] : Math.round((waits[mid - 1] + waits[mid]) / 2);
   return { days: median, count: waits.length };
 }
+
+export interface ShopCapacity {
+  /** Rafts opened together on the floor. */
+  batchSize: number;
+  /** Working days to finish a batch. */
+  batchDays: number;
+  /** Working days after service for invoicing and return. */
+  handoffDays: number;
+}
+
+/**
+ * How long a raft arriving today should take to come back, in calendar days.
+ * The floor works in batches: everything already waiting goes first, in full
+ * batches, behind whatever batch is on the floor now. The new raft joins the
+ * first batch with room, that batch is worked, then it is invoiced and returned.
+ */
+export function calculatedTurnaround(waiting: number, onFloor: number, shop: ShopCapacity): number {
+  const batchesAhead = Math.floor(waiting / shop.batchSize) + (onFloor > 0 ? 1 : 0);
+  const workingDays = batchesAhead * shop.batchDays + shop.batchDays + shop.handoffDays;
+  // Five working days to a seven-day week.
+  return Math.ceil((workingDays * 7) / 5);
+}

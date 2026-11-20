@@ -4,7 +4,7 @@ import { formatDate, isoDay } from "@/lib/format";
 import { getMode, MODE_LABELS, MODES } from "@/lib/mode";
 import { PRIORITY_LABELS } from "@/lib/raft-options";
 import { createClient } from "@/lib/supabase/server";
-import { describeDays, measuredTurnaround } from "@/lib/turnaround";
+import { calculatedTurnaround, describeDays, measuredTurnaround } from "@/lib/turnaround";
 import { availableActions, MAIN_STAGES, SIDE_STAGES, STAGE_LABELS, type Stage } from "@/lib/workflow";
 import { moveJob, setMode, setSchedule, setTurnaround } from "./actions";
 
@@ -53,7 +53,7 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
   const sp = await searchParams;
   const supabase = await createClient();
   const [{ data: locations }, { data: me }] = await Promise.all([
-    supabase.from("locations").select("id, name, turnaround_days, turnaround_set_at").order("name"),
+    supabase.from("locations").select("id, name, turnaround_days, turnaround_set_at, batch_size, batch_days, handoff_days").order("name"),
     supabase.from("staff").select("home_location_id").eq("id", staff.id).maybeSingle(),
   ]);
   const sort: Sort = SORTS.some(([k]) => k === sp.sort) ? (sp.sort as Sort) : "stage";
@@ -83,14 +83,26 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
     .gte("serviced_on", isoDay(-45))
     .limit(2000);
   const shownShops = (locations ?? []).filter((l) => shop === "all" || l.id === shop);
-  const turnaround = shownShops.map((l) => ({
+  const turnaround = shownShops.map((l) => {
+    const mine = jobs.filter((j) => j.location_id === l.id);
+    const waiting = mine.filter((j) => j.stage === "received" || j.stage === "incoming").length;
+    const onFloor = mine.filter((j) => j.stage === "on_floor" || j.stage === "awaiting_estimate").length;
+    const calculated =
+      l.batch_size && l.batch_days
+        ? calculatedTurnaround(waiting, onFloor, { batchSize: l.batch_size, batchDays: l.batch_days, handoffDays: l.handoff_days ?? 0 })
+        : null;
+    return {
     ...l,
+    waiting,
+    onFloor,
+    calculated,
     measured: measuredTurnaround(
       ((recent ?? []) as unknown as { serviced_on: string; location_id: string; service_jobs: { date_received: string | null } | null }[])
         .filter((r) => r.location_id === l.id)
         .map((r) => ({ received: r.service_jobs?.date_received ?? null, servicedOn: r.serviced_on })),
     ),
-  }));
+  };
+  });
   const todayIso = isoDay();
   const done = typeof sp.done === "string" ? sp.done : "";
   const failed = typeof sp.error === "string" ? sp.error : "";
@@ -154,32 +166,57 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
       <section className="flex flex-wrap gap-4">
         {turnaround.map((t) => (
           <div key={t.id} className="min-w-64 flex-1 rounded border border-[#FF5200] p-4">
-            <p className="text-sm">{t.name}: current turnaround</p>
+            <p className="text-sm">{t.name}: turnaround for a raft received today</p>
             <p className="text-2xl font-semibold">
-              {t.turnaround_days != null ? describeDays(t.turnaround_days) : "Not set"}
+              {t.turnaround_days != null
+                ? describeDays(t.turnaround_days)
+                : t.calculated != null
+                  ? describeDays(t.calculated)
+                  : "Not set"}
+            </p>
+            <p className="text-sm">
+              {t.calculated != null
+                ? `Calculated: ${describeDays(t.calculated)} (${t.waiting} waiting, ${t.onFloor} on the floor, batches of ${t.batch_size} every ${t.batch_days} working days).`
+                : "Enter the batch size and days to get a calculated figure."}
+              {t.turnaround_days != null && t.calculated != null && Math.abs(t.turnaround_days - t.calculated) >= 4
+                ? " The quoted figure differs from the calculation."
+                : ""}
             </p>
             <p className="text-sm opacity-75">
-              {t.turnaround_days != null && t.turnaround_set_at ? `Set ${formatDate(t.turnaround_set_at)}. ` : ""}
+              {t.turnaround_days != null && t.turnaround_set_at ? `Quoted figure set by hand ${formatDate(t.turnaround_set_at)}. ` : ""}
               {t.measured
                 ? `Last ${t.measured.count} jobs took ${describeDays(t.measured.days)} from arrival to sign-off.`
                 : "Not enough completed jobs here yet to measure."}
             </p>
             {staff.role === "admin" ? (
-              <form action={setTurnaround} className="mt-2 flex items-center gap-2 text-sm">
-                <input type="hidden" name="location_id" value={t.id} />
-                <input type="hidden" name="back" value={here} />
-                <input
-                  name="days"
-                  inputMode="numeric"
-                  defaultValue={t.turnaround_days ?? ""}
-                  aria-label={`${t.name} turnaround in days`}
-                  className="w-20 rounded border border-zinc-500/60 bg-transparent px-2 py-1"
-                />
-                <span>days</span>
-                <button type="submit" className="rounded border border-zinc-500/60 px-3 py-1">
-                  Update
-                </button>
-              </form>
+              <details className="mt-2 text-sm">
+                <summary className="cursor-pointer underline">Adjust</summary>
+                <form action={setTurnaround} className="mt-2 grid grid-cols-2 gap-2">
+                  <input type="hidden" name="location_id" value={t.id} />
+                  <input type="hidden" name="back" value={here} />
+                  {(
+                    [
+                      ["days", "Quote this many days (blank = use the calculation)", t.turnaround_days],
+                      ["batch_size", "Rafts per batch", t.batch_size],
+                      ["batch_days", "Working days per batch", t.batch_days],
+                      ["handoff_days", "Working days for invoice and return", t.handoff_days],
+                    ] as const
+                  ).map(([name, label, value]) => (
+                    <label key={name}>
+                      {label}
+                      <input
+                        name={name}
+                        inputMode="numeric"
+                        defaultValue={value ?? ""}
+                        className="block w-24 rounded border border-zinc-500/60 bg-transparent px-2 py-1"
+                      />
+                    </label>
+                  ))}
+                  <button type="submit" className="col-span-2 w-fit rounded border border-zinc-500/60 px-3 py-1">
+                    Save
+                  </button>
+                </form>
+              </details>
             ) : null}
           </div>
         ))}
