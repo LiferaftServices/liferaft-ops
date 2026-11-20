@@ -6,8 +6,29 @@ import { addByCode, type PartState } from "./actions";
 
 const START: PartState = { ok: true, message: null, unknownCode: null };
 const REPEAT_GAP_MS = 2500; // the same label must leave view, or wait, before it counts again
+const LINEAR_EVERY_MS = 120; // ordinary barcodes are slower to read than QR codes, so not every frame
 
-/** Camera scanning for part labels, plus a box for typing a code or part number. */
+// Built into Chrome on Android and recent Safari; reads QR codes and barcodes together.
+interface NativeDetector {
+  detect(source: HTMLVideoElement): Promise<{ rawValue: string }[]>;
+}
+const NATIVE_FORMATS = ["qr_code", "code_128", "code_39", "code_93", "ean_13", "ean_8", "upc_a", "upc_e", "itf", "codabar"];
+
+async function nativeDetector(): Promise<NativeDetector | null> {
+  const Ctor = (globalThis as unknown as {
+    BarcodeDetector?: { new (o: { formats: string[] }): NativeDetector; getSupportedFormats(): Promise<string[]> };
+  }).BarcodeDetector;
+  if (!Ctor) return null;
+  try {
+    const supported = await Ctor.getSupportedFormats();
+    if (!supported.includes("qr_code") || !supported.includes("code_128")) return null;
+    return new Ctor({ formats: NATIVE_FORMATS.filter((f) => supported.includes(f)) });
+  } catch {
+    return null;
+  }
+}
+
+/** Camera scanning for part labels (QR codes and ordinary barcodes), plus a box for typing a code or part number. */
 export function PartScanner({ jobId }: { jobId: string }) {
   const [state, action, pending] = useActionState(addByCode, START);
   const [scanning, setScanning] = useState(false);
@@ -30,23 +51,52 @@ export function PartScanner({ jobId }: { jobId: string }) {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
+    let native: NativeDetector | null = null;
+    let decodeLinear: typeof import("@/lib/barcode").decodeLinear | null = null;
+    let lastLinearAt = 0;
+    let linearSeen = ""; // a barcode must read the same twice running, to rule out misreads
+    let working = false;
+    void nativeDetector().then((d) => {
+      native = d;
+      if (!d) void import("@/lib/barcode").then((m) => (decodeLinear = m.decodeLinear));
+    });
+
+    const accept = (text: string | undefined | null) => {
+      const now = Date.now();
+      if (text && !busy.current && (text !== last.current.code || now - last.current.at > REPEAT_GAP_MS)) {
+        last.current = { code: text, at: now };
+        if (codeInput.current && form.current) {
+          codeInput.current.value = text;
+          navigator.vibrate?.(60);
+          form.current.requestSubmit();
+        }
+      }
+    };
+
     const tick = () => {
       if (stopped) return;
       const v = video.current;
-      if (v && ctx && v.readyState >= 2 && v.videoWidth) {
-        canvas.width = v.videoWidth;
-        canvas.height = v.videoHeight;
-        ctx.drawImage(v, 0, 0);
-        const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const found = jsQR(image.data, image.width, image.height, { inversionAttempts: "dontInvert" });
-        const text = found?.data.trim();
-        const now = Date.now();
-        if (text && !busy.current && (text !== last.current.code || now - last.current.at > REPEAT_GAP_MS)) {
-          last.current = { code: text, at: now };
-          if (codeInput.current && form.current) {
-            codeInput.current.value = text;
-            navigator.vibrate?.(60);
-            form.current.requestSubmit();
+      if (v && ctx && v.readyState >= 2 && v.videoWidth && !working) {
+        if (native) {
+          working = true;
+          native
+            .detect(v)
+            .then((found) => accept(found[0]?.rawValue.trim()))
+            .catch(() => (native = null))
+            .finally(() => (working = false));
+        } else {
+          canvas.width = v.videoWidth;
+          canvas.height = v.videoHeight;
+          ctx.drawImage(v, 0, 0);
+          const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const qr = jsQR(image.data, image.width, image.height, { inversionAttempts: "dontInvert" })?.data.trim();
+          if (qr) {
+            accept(qr);
+          } else if (decodeLinear && Date.now() - lastLinearAt > LINEAR_EVERY_MS) {
+            lastLinearAt = Date.now();
+            const bar = decodeLinear(image.data, image.width, image.height);
+            if (bar && bar === linearSeen) accept(bar);
+            linearSeen = bar ?? "";
           }
         }
       }
@@ -54,7 +104,7 @@ export function PartScanner({ jobId }: { jobId: string }) {
     };
 
     navigator.mediaDevices
-      ?.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+      ?.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
       .then((s) => {
         if (stopped) return s.getTracks().forEach((t) => t.stop());
         stream = s;
