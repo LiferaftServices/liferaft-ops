@@ -169,6 +169,11 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
             {STAGE_LABELS[openJob.stage]} · {openJob.locations?.name ?? ""} · received{" "}
             {formatDate(openJob.date_received)} · {PRIORITY_LABELS[openJob.priority] ?? openJob.priority}
           </p>
+          <p className="mt-2">
+            <Link className="font-semibold underline" href="/board">
+              Open the service board
+            </Link>
+          </p>
         </section>
       ) : (
         <details open={sp.checkin === "1"} className="rounded border border-zinc-500/40 p-4 text-sm">
@@ -270,6 +275,13 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
           </label>
           <label className="flex items-center gap-2">
             <input type="checkbox" name="lapsed" defaultChecked={a.lapsed} /> Lapsed (leave off reminders)
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="retired" defaultChecked={a.retired} /> Retired (condemned or do not service)
+          </label>
+          <label>
+            Reason, if retired
+            <input name="retired_reason" className={INPUT} />
           </label>
           <button type="submit" className={`${BUTTON} sm:col-span-2`}>
             Save details

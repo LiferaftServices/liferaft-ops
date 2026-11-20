@@ -38,8 +38,8 @@ export async function addCustomer(_prev: NewCustomerState, form: FormData): Prom
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { error: "That email address does not look right.", matches: [], needsConfirm: false };
   }
-  // The same naming the customer list already uses: "Last, First" for people.
-  const displayName = company || `${last}, ${first}`;
+  // People are named "First Last"; companies go by the company name.
+  const displayName = company || `${first} ${last}`;
 
   // Look for people who may already be in QuickBooks under another spelling.
   const supabase = await createClient();

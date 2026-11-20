@@ -16,6 +16,9 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
             <span className="text-[#FF5200]">Liferaft Services</span> Operations
           </Link>
           <nav className="flex gap-4 text-sm font-semibold">
+            <Link href="/board" className="underline">
+              Board
+            </Link>
             <Link href="/intake" className="underline">
               Intake
             </Link>

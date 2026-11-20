@@ -383,3 +383,52 @@ describe("intake", () => {
     }
   });
 });
+
+describe("moving a job", () => {
+  it("moves only from the stage the person saw, logs it, and records the service at sign-off", async () => {
+    const staff = await one<{ id: string }>(
+      `insert into staff (id, full_name, email, role) values (gen_random_uuid(), 'TRAINING Tech', 'training-tech@example.test', 'user') returning id`,
+    );
+    const c = await one<{ id: string }>(`insert into customers (name) values ('TRAINING Board Owner') returning id`);
+    await db.exec(`set request.jwt.claim.sub = '${staff.id}';`);
+    try {
+      const raft = (
+        await db.query<{ id: string }>(
+          `select register_raft($1, null, $2, 'TRN-BOARD-1', 'TRAINING', null, 6, 'SOLAS A', null, 12, $3) as id`,
+          [c.id, newSystemId(), ids.york],
+        )
+      ).rows[0].id;
+      const job = (
+        await db.query<{ id: string }>(`select check_in_asset($1, $2, 'hot', false, null, null, null, null) as id`, [raft, ids.york])
+      ).rows[0].id;
+      const move = (from: string, to: string, action: string, closes = false) =>
+        db.query(`select move_job($1, $2, $3, $4, $5, null, null, null)`, [job, from, to, action, closes]);
+
+      await move("received", "incoming", "schedule_service");
+      await expect(move("received", "incoming", "schedule_service")).rejects.toThrow(/already moved/);
+      await move("incoming", "on_floor", "begin_service");
+      expect((await one<{ t: string }>(`select technician_id as t from service_jobs where id = $1`, [job])).t).toBe(staff.id);
+      await move("on_floor", "needs_invoice", "complete_inspection");
+
+      const a = await one<{ last: string; due: string }>(
+        `select last_serviced_on::text as last, next_service_due::text as due from assets where id = $1`,
+        [raft],
+      );
+      expect(a.last).toBe((await one<{ d: string }>(`select current_date::text as d`)).d);
+      expect(a.due).toBe((await one<{ d: string }>(`select (current_date + interval '12 months')::date::text as d`)).d);
+      expect((await one<{ n: number }>(`select count(*)::int n from service_history where job_id = $1`, [job])).n).toBe(1);
+      expect((await one<{ n: number }>(`select count(*)::int n from job_board where id = $1`, [job])).n).toBe(1);
+
+      await move("needs_invoice", "ready_for_pickup", "invoice_for_pickup");
+      await move("ready_for_pickup", "customer_picked_up", "customer_collects", true);
+      expect((await one<{ n: number }>(`select count(*)::int n from job_board where id = $1`, [job])).n).toBe(0);
+      await expect(move("customer_picked_up", "received", "x")).rejects.toThrow(/closed/);
+      const log = (await db.query<{ action: string }>(`select action from job_events where job_id = $1 order by id`, [job])).rows;
+      expect(log.map((r) => r.action)).toEqual([
+        "checked_in", "schedule_service", "begin_service", "complete_inspection", "invoice_for_pickup", "customer_collects",
+      ]);
+    } finally {
+      await db.exec(`reset request.jwt.claim.sub;`);
+    }
+  });
+});

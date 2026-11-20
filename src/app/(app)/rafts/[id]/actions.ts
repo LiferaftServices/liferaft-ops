@@ -48,6 +48,8 @@ export async function updateRaft(form: FormData) {
       next_service_due: orNull(text(form, "next_service_due")),
       is_loaner: form.get("is_loaner") === "on",
       lapsed: form.get("lapsed") === "on",
+      retired: form.get("retired") === "on",
+      retired_reason: form.get("retired") === "on" ? orNull(text(form, "retired_reason")) : null,
       confirmed: true, // a person has now looked at and saved these details
     })
     .eq("id", id);
