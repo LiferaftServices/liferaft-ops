@@ -74,3 +74,14 @@ export function buildInvoice(input: InvoiceInput): Record<string, unknown> {
     ...(input.billEmail ? { BillEmail: { Address: input.billEmail } } : {}),
   };
 }
+
+/**
+ * True when an invoice in QuickBooks no longer matches what was sent: a different total
+ * or a different number of item lines. Payments do not count; they change the balance only.
+ */
+export function invoiceChanged(
+  sent: { total: number; lines: number },
+  now: { total: number; lines: number },
+): boolean {
+  return Math.abs(sent.total - now.total) >= 0.005 || sent.lines !== now.lines;
+}

@@ -5,7 +5,7 @@ import { formatDate, safeTerm } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { STAGE_LABELS, type Stage } from "@/lib/workflow";
 import { SERVICE_CLASS_LABELS } from "@/lib/raft-options";
-import { acknowledgeHold, addItem, addStandard, checkPayment, createInvoice, setQuantity } from "./actions";
+import { acknowledgeHold, addItem, addStandard, checkPayment, createAdditionalInvoice, createInvoice, setQuantity } from "./actions";
 import { PartScanner } from "./scanner";
 
 export const instant = false;
@@ -29,7 +29,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
   if (!job) notFound();
   const [{ data: a }, { data: lines }, { data: items }] = await Promise.all([
     supabase.from("asset_overview").select("serial_number, brand, capacity, equipment_type, customer_name, vessel_name, service_class").eq("id", job.asset_id).maybeSingle(),
-    supabase.from("job_lines").select("id, part_number, description, quantity, unit_price, source").eq("job_id", id).order("created_at"),
+    supabase.from("job_lines").select("id, part_number, description, quantity, unit_price, source, invoice_id").eq("job_id", id).order("created_at"),
     q
       ? supabase
           .from("qbo_items")
@@ -40,7 +40,17 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
           .limit(25)
       : Promise.resolve({ data: null }),
   ]);
-  const open = !job.closed_at && !job.qbo_invoice_id;
+  const open = !job.closed_at;
+  const invoiced = Boolean(job.qbo_invoice_id);
+  const { data: invoices } = invoiced
+    ? await supabase
+        .from("job_invoices")
+        .select("id, qbo_invoice_id, doc_number, kind, total_sent, lines_sent, total, lines_now, balance, changed_in_qbo")
+        .eq("job_id", id)
+        .order("created_at")
+    : { data: null };
+  const waiting = invoiced ? (lines ?? []).filter((l) => !l.invoice_id) : [];
+  const waitingTotal = waiting.reduce((sum, l) => sum + Number(l.quantity) * Number(l.unit_price), 0);
   const done = typeof sp.done === "string" ? sp.done : "";
   const failed = typeof sp.error === "string" ? sp.error : "";
   const { data: billId } = await supabase.rpc("invoice_qbo_customer_id", { p_asset_id: job.asset_id });
@@ -106,10 +116,13 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
                     <span className="font-semibold">{l.part_number}</span>
                     {l.source === "standard" ? <span className="ml-2 text-xs opacity-75">standard service</span> : null}
                     {l.source === "certificate" ? <span className="ml-2 text-xs opacity-75">certificate</span> : null}
+                    {invoiced && !l.invoice_id ? (
+                      <span className="ml-2 text-xs font-semibold text-[#FF5200]">not invoiced yet</span>
+                    ) : null}
                     {l.description ? <span className="block opacity-75">{l.description}</span> : null}
                   </td>
                   <td className="py-2 pr-4">
-                    {open ? (
+                    {open && !l.invoice_id ? (
                       <form action={setQuantity} className="flex items-center gap-2">
                         <input type="hidden" name="job_id" value={id} />
                         <input type="hidden" name="line_id" value={l.id} />
@@ -141,8 +154,8 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
             </tbody>
           </table>
         )}
-        {open ? <p className="mt-1 text-sm opacity-75">Set a quantity to 0 to remove a part.</p> : null}
-        {open && !(lines ?? []).some((l) => l.source === "standard") ? (
+        {open && !invoiced ? <p className="mt-1 text-sm opacity-75">Set a quantity to 0 to remove a part.</p> : null}
+        {open && !invoiced && !(lines ?? []).some((l) => l.source === "standard") ? (
           <div className="mt-3 rounded border border-zinc-500/40 p-3 text-sm">
             <p>
               No standard service line on this job.{" "}
@@ -162,25 +175,43 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
 
       {job.qbo_invoice_id ? (
         <section className="rounded border border-[#FF5200] p-4 text-sm">
-          <h2 className="text-lg font-semibold">Invoice {job.qbo_invoice_number ?? ""}</h2>
-          <p className="mt-1">
-            Total {money(Number(job.invoice_total ?? 0))} ·{" "}
+          <h2 className="text-lg font-semibold">{(invoices ?? []).length > 1 ? "Invoices" : "Invoice"}</h2>
+          <ul className="mt-1">
+            {(invoices ?? []).map((inv) => (
+              <li key={inv.id} className="border-b border-zinc-500/20 py-2">
+                <a
+                  className="font-semibold underline"
+                  href={`https://qbo.intuit.com/app/invoice?txnId=${inv.qbo_invoice_id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {inv.doc_number ?? "Invoice"}
+                </a>
+                {inv.kind === "additional" ? " (added items)" : " (service)"} · {money(Number(inv.total))} ·{" "}
+                {Number(inv.balance) > 0 ? (
+                  <span className="font-semibold text-red-700">{money(Number(inv.balance))} owing</span>
+                ) : (
+                  <span className="font-semibold">Paid</span>
+                )}
+                {inv.changed_in_qbo ? (
+                  <p role="alert" className="mt-1 font-semibold text-red-700">
+                    This invoice was changed in QuickBooks after it was created here. It was sent as{" "}
+                    {money(Number(inv.total_sent))} with {inv.lines_sent} item lines and now shows {money(Number(inv.total))}{" "}
+                    with {inv.lines_now}. Anything added there after SOS built its shipment will not ship, so check
+                    SOS. Add later items below instead, and they go on an invoice of their own.
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2">
+            Job total {money(Number(job.invoice_total ?? 0))} ·{" "}
             {job.payment_status === "paid" ? (
               <span className="font-semibold">Paid</span>
             ) : (
               <span className="font-semibold text-red-700">Unpaid, {money(Number(job.invoice_balance ?? 0))} owing</span>
             )}
             {job.payment_checked_at ? ` · checked ${formatDate(job.payment_checked_at)}` : ""}
-          </p>
-          <p className="mt-2 flex flex-wrap items-center gap-4">
-            <a
-              className="font-semibold underline"
-              href={`https://qbo.intuit.com/app/invoice?txnId=${job.qbo_invoice_id}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open in QuickBooks
-            </a>
           </p>
           <form action={checkPayment} className="mt-2">
             <input type="hidden" name="job_id" value={id} />
@@ -257,10 +288,37 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
         </section>
       ) : null}
 
+      {open && invoiced && waiting.length ? (
+        <section className="rounded border border-[#FF5200] p-4 text-sm">
+          <h2 className="text-lg font-semibold">Added items waiting for an invoice</h2>
+          <p className="mt-1">
+            {waiting.length} {waiting.length === 1 ? "item" : "items"}, {money(waitingTotal)} before tax. These go on a
+            new, separate invoice. The invoice already in QuickBooks is not changed, so SOS ships these from their own
+            order. The raft stays on hold until every invoice on this job is paid.
+          </p>
+          <form action={createAdditionalInvoice} className="mt-3 flex flex-col gap-3">
+            <input type="hidden" name="job_id" value={id} />
+            <label className="flex items-center gap-2 font-semibold">
+              <input type="checkbox" name="reviewed" required /> I have reviewed the added items and they are correct
+            </label>
+            <button type="submit" className="w-fit rounded bg-[#FF5200] px-4 py-2 font-semibold text-white">
+              Approve and create additional invoice in QuickBooks
+            </button>
+            <p className="opacity-75">This creates a real invoice in QuickBooks. It is not emailed to the customer.</p>
+          </form>
+        </section>
+      ) : null}
+
       {open ? (
         <>
           <section>
-            <h2 className="text-lg font-semibold">Add parts</h2>
+            <h2 className="text-lg font-semibold">{invoiced ? "Add items for another invoice" : "Add parts"}</h2>
+            {invoiced ? (
+              <p className="mt-1 text-sm">
+                The service invoice is already in QuickBooks. Anything added now, such as an EPIRB or a hydrostatic
+                release, goes on a separate invoice.
+              </p>
+            ) : null}
             <div className="mt-2">
               <PartScanner jobId={id} />
             </div>
@@ -323,7 +381,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
           </section>
         </>
       ) : (
-        <p className="text-sm">This job is closed or invoiced, so its parts can no longer be changed.</p>
+        <p className="text-sm">This job is closed, so nothing more can be added to it.</p>
       )}
     </main>
   );

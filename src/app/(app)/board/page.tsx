@@ -37,6 +37,8 @@ interface Job {
   qbo_invoice_id: string | null;
   qbo_invoice_number: string | null;
   invoice_balance: number | null;
+  invoice_changed: boolean;
+  has_uninvoiced_items: boolean;
 }
 
 const SORTS = [
@@ -290,6 +292,12 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
                               Unpaid{j.payment_hold_acknowledged ? " (release approved)" : ""}
                             </span>
                           )
+                        ) : null}
+                        {j.invoice_changed ? (
+                          <span className="ml-2 font-semibold text-red-700">Invoice changed in QuickBooks</span>
+                        ) : null}
+                        {j.has_uninvoiced_items ? (
+                          <span className="ml-2 font-semibold text-[#FF5200]">Added items not invoiced</span>
                         ) : null}
                       </p>
                       <p>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildInvoice, discountAmount, invoiceSubtotal, type InvoiceLineInput } from "../src/lib/qbo/invoice";
+import { buildInvoice, discountAmount, invoiceChanged, invoiceSubtotal, type InvoiceLineInput } from "../src/lib/qbo/invoice";
 
 // The lines of a real service invoice, to check the arithmetic against QuickBooks.
 const lines: InvoiceLineInput[] = [
@@ -46,5 +46,17 @@ describe("service invoice", () => {
   it("refuses a discount when the discount items are missing, and an empty invoice", () => {
     expect(() => buildInvoice({ qboCustomerId: "1", date: "2026-11-20", lines, discountPercent: 5 })).toThrow(/discount/);
     expect(() => buildInvoice({ qboCustomerId: "1", date: "2026-11-20", lines: [] })).toThrow(/at least one line/);
+  });
+});
+
+describe("invoice changed in QuickBooks", () => {
+  const sent = { total: 907.4, lines: 10 };
+  it("is quiet when nothing changed, including after a payment", () => {
+    expect(invoiceChanged(sent, { total: 907.4, lines: 10 })).toBe(false);
+  });
+  it("flags an added item, and a swap that keeps the total", () => {
+    expect(invoiceChanged(sent, { total: 1957.35, lines: 11 })).toBe(true);
+    expect(invoiceChanged(sent, { total: 907.4, lines: 11 })).toBe(true);
+    expect(invoiceChanged(sent, { total: 897.4, lines: 10 })).toBe(true);
   });
 });

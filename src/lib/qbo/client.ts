@@ -303,7 +303,25 @@ export interface CreatedInvoice {
   docNumber: string | null;
   total: number;
   balance: number;
+  /** Item lines on the invoice (subtotal and other computed lines are not counted). */
+  lineCount: number;
 }
+
+interface RawInvoice {
+  Id: string;
+  DocNumber?: string;
+  TotalAmt?: number;
+  Balance?: number;
+  Line?: { DetailType?: string }[];
+}
+
+const toInvoice = (inv: RawInvoice, balanceFallback: number): CreatedInvoice => ({
+  id: inv.Id,
+  docNumber: inv.DocNumber ?? null,
+  total: inv.TotalAmt ?? 0,
+  balance: inv.Balance ?? balanceFallback,
+  lineCount: (inv.Line ?? []).filter((l) => l.DetailType === "SalesItemLineDetail").length,
+});
 
 /**
  * Creates an invoice in QuickBooks. This WRITES to QuickBooks: only call it after a
@@ -316,17 +334,13 @@ export async function createQboInvoice(payload: Record<string, unknown>, request
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  })) as { Invoice: { Id: string; DocNumber?: string; TotalAmt?: number; Balance?: number } };
-  const inv = res.Invoice;
-  return { id: inv.Id, docNumber: inv.DocNumber ?? null, total: inv.TotalAmt ?? 0, balance: inv.Balance ?? inv.TotalAmt ?? 0 };
+  })) as { Invoice: RawInvoice };
+  return toInvoice(res.Invoice, res.Invoice.TotalAmt ?? 0);
 }
 
 /** Reads an invoice's current total and open balance from QuickBooks. */
 export async function fetchQboInvoice(invoiceId: string): Promise<CreatedInvoice> {
   const conn = await getConnection();
-  const res = (await qboFetch(conn, `invoice/${encodeURIComponent(invoiceId)}`)) as {
-    Invoice: { Id: string; DocNumber?: string; TotalAmt?: number; Balance?: number };
-  };
-  const inv = res.Invoice;
-  return { id: inv.Id, docNumber: inv.DocNumber ?? null, total: inv.TotalAmt ?? 0, balance: inv.Balance ?? 0 };
+  const res = (await qboFetch(conn, `invoice/${encodeURIComponent(invoiceId)}`)) as { Invoice: RawInvoice };
+  return toInvoice(res.Invoice, 0);
 }
