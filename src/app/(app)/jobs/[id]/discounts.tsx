@@ -24,7 +24,7 @@ const field = "rounded border border-zinc-500/60 bg-transparent px-2 py-1.5";
  * amount; typing a percent works the amount out from the subtotal, and the amount can
  * then be changed by hand.
  */
-export function DiscountRows({ items, subtotal }: { items: DiscountItem[]; subtotal: number }) {
+export function DiscountRows({ items, subtotal, formId }: { items: DiscountItem[]; subtotal: number; formId?: string }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [next, setNext] = useState(1);
   const total = rows.reduce((sum, r) => sum + (Number(r.amount) > 0 ? Number(r.amount) : 0), 0);
@@ -44,6 +44,7 @@ export function DiscountRows({ items, subtotal }: { items: DiscountItem[]; subto
             Discount item
             <select
               name="discount_item"
+              form={formId}
               value={r.item}
               onChange={(e) => update(r.key, { item: e.target.value })}
               required
@@ -77,6 +78,7 @@ export function DiscountRows({ items, subtotal }: { items: DiscountItem[]; subto
             Amount, $
             <input
               name="discount_amount"
+              form={formId}
               inputMode="decimal"
               value={r.amount}
               onChange={(e) => update(r.key, { amount: e.target.value, percent: "" })}
@@ -103,10 +105,18 @@ export function DiscountRows({ items, subtotal }: { items: DiscountItem[]; subto
       >
         Add a discount
       </button>
-      <p>
-        Subtotal {money(subtotal)}
-        {rows.length ? ` · discounts ${money(total)} · total before tax ${money(cents(subtotal - total))}` : ""}
-      </p>
+      {rows
+        .filter((r) => Number(r.amount) > 0)
+        .map((r) => (
+          <div key={r.key} className="flex items-center gap-3 border-t border-zinc-500/20 py-1.5">
+            <span className="flex-1 text-right">{items.find((i) => i.qbo_id === r.item)?.name ?? "Discount"}</span>
+            <span className="w-24 text-right tabular-nums">−{money(Number(r.amount))}</span>
+          </div>
+        ))}
+      <div className="flex items-center gap-3 border-t-2 border-[#FF5200] py-2 text-base font-semibold">
+        <span className="flex-1 text-right">Invoice total, before tax</span>
+        <span className="w-24 text-right tabular-nums">{money(cents(subtotal - total))}</span>
+      </div>
       {rows.length ? (
         <p className="opacity-75">
           A percent is worked out on the full subtotal. For a discount on only some of the items, type the dollar

@@ -100,9 +100,12 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
         </p>
       </header>
 
-      <p className="text-sm">
+      <p className="flex flex-wrap gap-4 text-sm">
         <Link className="underline" href="/board">
           Service board
+        </Link>
+        <Link className="underline" href={`/jobs/${id}/inspection`}>
+          Inspection for this raft
         </Link>
       </p>
 
@@ -130,6 +133,11 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
             canArrange={open && !invoiced && job.stage === "needs_invoice"}
           />
         )}
+        {open && !invoiced && job.stage === "needs_invoice" && (lines ?? []).length ? (
+          <div className="mt-3 text-sm">
+            <DiscountRows items={discounts} subtotal={total} formId="invoice-form" />
+          </div>
+        ) : null}
         {open && !invoiced ? <p className="mt-1 text-sm opacity-75">Set a quantity to 0 to remove a part.</p> : null}
         {open && !invoiced && !(lines ?? []).some((l) => l.source === "standard") ? (
           <div className="mt-3 rounded border border-zinc-500/40 p-3 text-sm">
@@ -234,9 +242,9 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
             Check the parts list above against the work done. Correct quantities, add anything missing,
             then approve. Sales tax is worked out by QuickBooks.
           </p>
-          <form action={createInvoice} className="mt-3 flex flex-col gap-3">
+          <form id="invoice-form" action={createInvoice} className="mt-3 flex flex-col gap-3">
             <input type="hidden" name="job_id" value={id} />
-            <DiscountRows items={discounts} subtotal={total} />
+            <p>Discounts are entered under the parts list above, where the invoice total is shown.</p>
             <fieldset className="flex flex-wrap gap-4">
               <legend className="font-semibold">After invoicing, the raft will be</legend>
               <label className="flex items-center gap-2">

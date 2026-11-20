@@ -74,6 +74,10 @@ export async function moveJob(form: FormData) {
     p_estimate_status: estimate,
     p_note: String(form.get("note") ?? "").slice(0, 500),
   });
+  if (!error && actionKey === "complete_inspection") {
+    // Use the work date and dated-as month from the inspection for the raft's service dates.
+    await supabase.rpc("apply_inspection_dates", { p_job: jobId });
+  }
   if (error) redirect(`${back}${join}error=${encodeURIComponent(error.message)}`);
   revalidatePath("/board");
   revalidatePath(`/rafts/${job.asset_id}`);

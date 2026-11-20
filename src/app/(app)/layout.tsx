@@ -19,6 +19,9 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
             <Link href="/board" className="underline">
               Board
             </Link>
+            <Link href="/inspections" className="underline">
+              Batch grid
+            </Link>
             <Link href="/intake" className="underline">
               Intake
             </Link>

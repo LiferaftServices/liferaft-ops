@@ -281,6 +281,11 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
                         >
                           {j.job_number} · parts and invoice
                         </Link>
+                        {j.stage === "on_floor" || j.stage === "needs_invoice" ? (
+                          <Link className="rounded border border-zinc-500/60 px-3 py-1 font-semibold" href={`/jobs/${j.id}/inspection`}>
+                            Inspection
+                          </Link>
+                        ) : null}
                         {j.priority !== "normal" ? (
                           <span className={j.priority === "hot" ? "ml-2 font-semibold text-[#FF5200]" : "ml-2 font-semibold"}>
                             {PRIORITY_LABELS[j.priority] ?? j.priority}
