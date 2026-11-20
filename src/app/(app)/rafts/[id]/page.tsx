@@ -64,6 +64,8 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
     : { data: [] };
 
   const facts: [string, string][] = [
+    ["Owner", a.customer_name ?? "Not linked"],
+    ["Current vessel", a.vessel_name ?? "None"],
     ["Label ID", a.system_id],
     ["Brand", a.brand ?? ""],
     ["Model", a.model ?? ""],
@@ -136,7 +138,7 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
           .map(([k, v]) => (
             <div key={k} className="contents">
               <dt className="opacity-75">{k}</dt>
-              <dd>{v}</dd>
+              <dd className={k === "Owner" || k === "Current vessel" ? "font-semibold" : undefined}>{v}</dd>
             </div>
           ))}
       </dl>

@@ -98,14 +98,14 @@ async function topAccount(db: Db, customerId: string): Promise<string> {
   return id;
 }
 
+/** "F/V Reel Action", "Reel Action" and "reel  action" are the same vessel. */
+const vesselKey = (name: string) => name.replace(VESSEL_PREFIX, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
 async function findOrCreateVessel(db: Db, accountId: string, name: string): Promise<string> {
-  const { data: found } = await db
-    .from("vessels")
-    .select("id")
-    .eq("customer_id", accountId)
-    .ilike("name", name.replace(/[%_\\]/g, " "))
-    .limit(1);
-  if (found?.length) return found[0].id;
+  const { data: existing } = await db.from("vessels").select("id, name").eq("customer_id", accountId).limit(1000);
+  const key = vesselKey(name);
+  const match = key ? (existing ?? []).find((v) => vesselKey(v.name) === key) : undefined;
+  if (match) return match.id;
   const { data, error } = await db.from("vessels").insert({ customer_id: accountId, name }).select("id").single();
   if (error) throw new Error(error.message);
   return data.id;
