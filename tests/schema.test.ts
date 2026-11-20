@@ -432,3 +432,39 @@ describe("moving a job", () => {
     }
   });
 });
+
+describe("parts on a job", () => {
+  it("adds a part once and raises the quantity on a repeat scan", async () => {
+    const staff = await one<{ id: string }>(
+      `insert into staff (id, full_name, email, role) values (gen_random_uuid(), 'TRAINING Parts', 'training-parts@example.test', 'user') returning id`,
+    );
+    const c = await one<{ id: string }>(`insert into customers (name) values ('TRAINING Parts Owner') returning id`);
+    await db.query(
+      `insert into qbo_items (qbo_id, name, fully_qualified_name, unit_price, taxable, active) values
+       ('T1', 'TRN-PART-1', 'Service Parts:TRN-PART-1', 12.5, true, true), ('T2', 'TRN-OLD', 'Service Parts:TRN-OLD', 1, true, false)`,
+    );
+    await db.exec(`set request.jwt.claim.sub = '${staff.id}';`);
+    try {
+      const raft = (
+        await db.query<{ id: string }>(
+          `select register_raft($1, null, $2, 'TRN-PARTS-RAFT', 'TRAINING', null, 4, 'Coastal', null, 12, $3) as id`,
+          [c.id, newSystemId(), ids.york],
+        )
+      ).rows[0].id;
+      const job = (
+        await db.query<{ id: string }>(`select check_in_asset($1, $2, 'normal', false, null, null, null, null) as id`, [raft, ids.york])
+      ).rows[0].id;
+      await db.query(`select add_job_line($1, 'T1', 1, 'scan')`, [job]);
+      await db.query(`select add_job_line($1, 'T1', 2, 'scan')`, [job]);
+      const lines = (await db.query<{ quantity: string; unit_price: string; part_number: string }>(
+        `select quantity, unit_price, part_number from job_lines where job_id = $1`, [job],
+      )).rows;
+      expect(lines).toHaveLength(1);
+      expect(Number(lines[0].quantity)).toBe(3);
+      expect(Number(lines[0].unit_price)).toBe(12.5);
+      await expect(db.query(`select add_job_line($1, 'T2', 1, 'manual')`, [job])).rejects.toThrow(/not an active/);
+    } finally {
+      await db.exec(`reset request.jwt.claim.sub;`);
+    }
+  });
+});

@@ -270,7 +270,9 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
                         <Link className="font-semibold underline" href={`/rafts/${j.asset_id}`}>
                           {j.serial_number ?? "No serial"}
                         </Link>{" "}
-                        <span className="opacity-75">{j.job_number}</span>
+                        <Link className="underline" href={`/jobs/${j.id}`}>
+                          {j.job_number} parts
+                        </Link>
                         {j.priority !== "normal" ? (
                           <span className={j.priority === "hot" ? "ml-2 font-semibold text-[#FF5200]" : "ml-2 font-semibold"}>
                             {PRIORITY_LABELS[j.priority] ?? j.priority}

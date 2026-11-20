@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/auth";
-import { syncCustomers } from "@/lib/qbo/client";
+import { syncCustomers, syncItems } from "@/lib/qbo/client";
 import { qboConfig } from "@/lib/qbo/config";
 import { revokeToken } from "@/lib/qbo/oauth";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -39,4 +39,17 @@ export async function disconnectQuickBooks(): Promise<ActionState> {
   }
   revalidatePath("/settings/quickbooks");
   return { ok: true, message: "QuickBooks is disconnected. The copied customer list is kept." };
+}
+
+/** Copies the products and services list from QuickBooks. Reads only. */
+export async function runItemSync(): Promise<ActionState> {
+  await requireStaff();
+  try {
+    const count = await syncItems();
+    revalidatePath("/settings/quickbooks");
+    return { ok: true, message: `Copied ${count.toLocaleString("en-US")} products and services from QuickBooks.` };
+  } catch (err) {
+    revalidatePath("/settings/quickbooks");
+    return { ok: false, message: err instanceof Error ? err.message : "The item copy failed." };
+  }
 }

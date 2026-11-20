@@ -1,7 +1,7 @@
 import { requireStaff } from "@/lib/auth";
 import { missingQboSettings } from "@/lib/qbo/config";
 import { createClient } from "@/lib/supabase/server";
-import { DisconnectButton, SyncButton } from "./controls";
+import { DisconnectButton, ItemSyncButton, SyncButton } from "./controls";
 
 export const instant = false;
 
@@ -96,6 +96,7 @@ export default async function QuickBooksSettings({
             ) : null}
           </section>
           <SyncButton />
+          <ItemSyncButton />
           {isAdmin ? (
             <a href="/api/qbo/customers-export" className="w-fit text-sm font-semibold underline">
               Download the customer copy (CSV)

@@ -245,3 +245,55 @@ export async function createQboCustomer(input: NewCustomerInput): Promise<string
   if (error) throw new Error(`Created in QuickBooks, but the local copy failed: ${error.message}`);
   return created.Id;
 }
+
+interface QboItem {
+  Id: string;
+  Name?: string;
+  FullyQualifiedName?: string;
+  Sku?: string;
+  Description?: string;
+  UnitPrice?: number;
+  Taxable?: boolean;
+  Type?: string;
+  Active?: boolean;
+}
+
+/** Copies the QuickBooks products and services list. Read-only as far as QuickBooks is concerned. */
+export async function syncItems(): Promise<number> {
+  const db = createAdminClient();
+  const conn = await getConnection();
+  const startedAt = new Date().toISOString();
+  let position = 1;
+  let total = 0;
+  for (;;) {
+    const page = await query<QboItem>(
+      conn,
+      `select * from Item where Active in (true, false) orderby Id startposition ${position} maxresults ${PAGE_SIZE}`,
+      "Item",
+    );
+    const rows = page
+      .filter((i) => i.Type !== "Category")
+      .map((i) => ({
+        qbo_id: i.Id,
+        name: (i.Name ?? i.FullyQualifiedName ?? `Item ${i.Id}`).trim(),
+        fully_qualified_name: (i.FullyQualifiedName ?? i.Name ?? `Item ${i.Id}`).trim(),
+        sku: i.Sku?.trim() || null,
+        description: i.Description?.trim() || null,
+        unit_price: typeof i.UnitPrice === "number" ? i.UnitPrice : null,
+        taxable: i.Taxable ?? false,
+        item_type: i.Type ?? null,
+        active: i.Active ?? true,
+        synced_at: startedAt,
+      }));
+    for (let i = 0; i < rows.length; i += UPSERT_BATCH) {
+      const { error } = await db.from("qbo_items").upsert(rows.slice(i, i + UPSERT_BATCH), { onConflict: "qbo_id" });
+      if (error) throw new Error(`Could not save items: ${error.message}`);
+    }
+    total += rows.length;
+    if (page.length < PAGE_SIZE) break;
+    position += PAGE_SIZE;
+  }
+  const { error } = await db.from("qbo_items").delete().lt("synced_at", startedAt);
+  if (error) throw new Error(`Could not remove stale items: ${error.message}`);
+  return total;
+}

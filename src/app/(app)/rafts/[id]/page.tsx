@@ -48,13 +48,14 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
   const [{ data: job }, { data: locations }] = await Promise.all([
     supabase
       .from("service_jobs")
-      .select("job_number, stage, priority, date_received, locations(name)")
+      .select("id, job_number, stage, priority, date_received, locations(name)")
       .eq("asset_id", id)
       .is("closed_at", null)
       .maybeSingle(),
     supabase.from("locations").select("id, name").order("name"),
   ]);
   const openJob = job as unknown as {
+    id: string;
     job_number: string;
     stage: keyof typeof STAGE_LABELS;
     priority: string;
@@ -170,8 +171,12 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
             {formatDate(openJob.date_received)} · {PRIORITY_LABELS[openJob.priority] ?? openJob.priority}
           </p>
           <p className="mt-2">
+            <Link className="font-semibold underline" href={`/jobs/${openJob.id}`}>
+              Parts for this job
+            </Link>{" "}
+            ·{" "}
             <Link className="font-semibold underline" href="/board">
-              Open the service board
+              Service board
             </Link>
           </p>
         </section>
