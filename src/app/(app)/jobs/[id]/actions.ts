@@ -133,6 +133,41 @@ export async function setQuantity(form: FormData) {
   revalidatePath(`/jobs/${jobId}`);
 }
 
+/** Saves the order of the rows in the parts list (lines and subtotal rows), top to bottom. */
+export async function saveOrder(jobId: string, ids: string[]): Promise<{ ok: boolean; message: string }> {
+  await requireStaff();
+  if (!UUID.test(jobId) || !Array.isArray(ids) || ids.length > 500 || !ids.every((i) => typeof i === "string" && UUID.test(i))) {
+    return { ok: false, message: "The new order could not be saved." };
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_job_order", { p_job: jobId, p_ids: ids });
+  if (error) return { ok: false, message: `The new order was not saved: ${error.message}` };
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: true, message: "" };
+}
+
+/** Adds a subtotal row at the end of the parts list. It is for the screen only. */
+export async function addSubtotal(form: FormData) {
+  const staff = await requireStaff();
+  const jobId = String(form.get("job_id") ?? "");
+  if (!UUID.test(jobId)) return;
+  const supabase = await createClient();
+  const { data: job } = await supabase.from("service_jobs").select("closed_at, qbo_invoice_id").eq("id", jobId).maybeSingle();
+  if (!job || job.closed_at || job.qbo_invoice_id) return;
+  await supabase.from("job_markers").insert({ job_id: jobId, created_by: staff.id });
+  revalidatePath(`/jobs/${jobId}`);
+}
+
+export async function removeSubtotal(form: FormData) {
+  await requireStaff();
+  const jobId = String(form.get("job_id") ?? "");
+  const markerId = String(form.get("marker_id") ?? "");
+  if (!UUID.test(jobId) || !UUID.test(markerId)) return;
+  const supabase = await createClient();
+  await supabase.from("job_markers").delete().eq("id", markerId).eq("job_id", jobId);
+  revalidatePath(`/jobs/${jobId}`);
+}
+
 /** Adds the standard service (labor) line and the certificate line, where there are rules for this raft. */
 export async function addStandard(form: FormData) {
   await requireStaff();
@@ -192,7 +227,7 @@ export async function createInvoice(form: FormData) {
   if (job!.stage !== "needs_invoice") fail("Only a job at Needs invoice can be invoiced.");
 
   const [{ data: lines }, { data: asset }, { data: target }] = await Promise.all([
-    supabase.from("job_lines").select("id, qbo_item_id, description, quantity, unit_price, taxable").eq("job_id", jobId).is("invoice_id", null).order("created_at"),
+    supabase.from("job_lines").select("id, qbo_item_id, description, quantity, unit_price, taxable").eq("job_id", jobId).is("invoice_id", null).order("position"),
     supabase.from("asset_overview").select("serial_number, vessel_name").eq("id", job!.asset_id).maybeSingle(),
     supabase.rpc("invoice_qbo_customer_id", { p_asset_id: job!.asset_id }),
   ]);
@@ -324,7 +359,7 @@ export async function createAdditionalInvoice(form: FormData) {
   if (!job!.qbo_invoice_id) fail("This job has no service invoice yet. Add the items and approve the service invoice instead.");
 
   const [{ data: lines }, { data: asset }, { data: target }] = await Promise.all([
-    supabase.from("job_lines").select("id, qbo_item_id, description, quantity, unit_price, taxable").eq("job_id", jobId).is("invoice_id", null).order("created_at"),
+    supabase.from("job_lines").select("id, qbo_item_id, description, quantity, unit_price, taxable").eq("job_id", jobId).is("invoice_id", null).order("position"),
     supabase.from("asset_overview").select("serial_number, vessel_name").eq("id", job!.asset_id).maybeSingle(),
     supabase.rpc("invoice_qbo_customer_id", { p_asset_id: job!.asset_id }),
   ]);

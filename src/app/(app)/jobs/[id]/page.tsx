@@ -6,7 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { STAGE_LABELS, type Stage } from "@/lib/workflow";
 import { SERVICE_CLASS_LABELS } from "@/lib/raft-options";
 import { DiscountRows } from "./discounts";
-import { acknowledgeHold, addItem, addStandard, checkPayment, createAdditionalInvoice, createInvoice, setQuantity } from "./actions";
+import { LinesList, type ListRow } from "./lines";
+import { acknowledgeHold, addItem, addStandard, checkPayment, createAdditionalInvoice, createInvoice } from "./actions";
 import { discountItems } from "@/lib/discounts";
 import { PartScanner } from "./scanner";
 
@@ -31,7 +32,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
   if (!job) notFound();
   const [{ data: a }, { data: lines }, { data: items }] = await Promise.all([
     supabase.from("asset_overview").select("serial_number, brand, capacity, equipment_type, customer_name, vessel_name, service_class").eq("id", job.asset_id).maybeSingle(),
-    supabase.from("job_lines").select("id, part_number, description, quantity, unit_price, source, invoice_id").eq("job_id", id).order("created_at"),
+    supabase.from("job_lines").select("id, part_number, description, quantity, unit_price, source, invoice_id, position").eq("job_id", id).order("position"),
     q
       ? supabase
           .from("qbo_items")
@@ -42,6 +43,24 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
           .limit(25)
       : Promise.resolve({ data: null }),
   ]);
+  const { data: markers } = await supabase.from("job_markers").select("id, position").eq("job_id", id);
+  const listRows: ListRow[] = [
+    ...(lines ?? []).map((l) => ({
+      id: l.id,
+      kind: "line" as const,
+      position: Number(l.position),
+      partNumber: l.part_number,
+      description: l.description,
+      quantity: Number(l.quantity),
+      unitPrice: Number(l.unit_price),
+      tag: l.source === "standard" ? "standard service" : l.source === "certificate" ? "certificate" : null,
+      waiting: Boolean(job.qbo_invoice_id) && !l.invoice_id,
+      locked: Boolean(l.invoice_id),
+    })),
+    ...(markers ?? []).map((m) => ({ id: m.id, kind: "subtotal" as const, position: Number(m.position) })),
+  ]
+    .sort((x, y) => x.position - y.position)
+    .map((row) => ({ ...row, position: undefined }));
   const open = !job.closed_at;
   const invoiced = Boolean(job.qbo_invoice_id);
   const { data: invoices } = invoiced
@@ -103,59 +122,13 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
         {(lines ?? []).length === 0 ? (
           <p className="mt-2 text-sm">No parts recorded yet.</p>
         ) : (
-          <table className="mt-2 w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-zinc-500/40">
-                <th className="py-2 pr-4 font-semibold">Part</th>
-                <th className="py-2 pr-4 font-semibold">Qty</th>
-                <th className="py-2 pr-4 text-right font-semibold">Each</th>
-                <th className="py-2 text-right font-semibold">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(lines ?? []).map((l) => (
-                <tr key={l.id} className="border-b border-zinc-500/20 align-top">
-                  <td className="py-2 pr-4">
-                    <span className="font-semibold">{l.part_number}</span>
-                    {l.source === "standard" ? <span className="ml-2 text-xs opacity-75">standard service</span> : null}
-                    {l.source === "certificate" ? <span className="ml-2 text-xs opacity-75">certificate</span> : null}
-                    {invoiced && !l.invoice_id ? (
-                      <span className="ml-2 text-xs font-semibold text-[#FF5200]">not invoiced yet</span>
-                    ) : null}
-                    {l.description ? <span className="block opacity-75">{l.description}</span> : null}
-                  </td>
-                  <td className="py-2 pr-4">
-                    {open && !l.invoice_id ? (
-                      <form action={setQuantity} className="flex items-center gap-2">
-                        <input type="hidden" name="job_id" value={id} />
-                        <input type="hidden" name="line_id" value={l.id} />
-                        <input
-                          name="quantity"
-                          inputMode="decimal"
-                          defaultValue={Number(l.quantity)}
-                          aria-label={`Quantity of ${l.part_number}`}
-                          className="w-16 rounded border border-zinc-500/60 bg-transparent px-2 py-1"
-                        />
-                        <button type="submit" className="underline">
-                          Save
-                        </button>
-                      </form>
-                    ) : (
-                      Number(l.quantity)
-                    )}
-                  </td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{money(Number(l.unit_price))}</td>
-                  <td className="py-2 text-right tabular-nums">{money(Number(l.quantity) * Number(l.unit_price))}</td>
-                </tr>
-              ))}
-              <tr>
-                <td colSpan={3} className="py-2 pr-4 text-right font-semibold">
-                  Parts total, before tax
-                </td>
-                <td className="py-2 text-right font-semibold tabular-nums">{money(total)}</td>
-              </tr>
-            </tbody>
-          </table>
+          <LinesList
+            key={listRows.map((r) => `${r.id}:${r.quantity ?? ""}`).join("|")}
+            jobId={id}
+            rows={listRows}
+            canEdit={open}
+            canArrange={open && !invoiced && job.stage === "needs_invoice"}
+          />
         )}
         {open && !invoiced ? <p className="mt-1 text-sm opacity-75">Set a quantity to 0 to remove a part.</p> : null}
         {open && !invoiced && !(lines ?? []).some((l) => l.source === "standard") ? (
