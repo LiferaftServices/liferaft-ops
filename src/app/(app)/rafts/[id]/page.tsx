@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaff } from "@/lib/auth";
-import { DUE_LABELS, dueState, formatDate } from "@/lib/format";
+import { DUE_LABELS, dueState, formatDate, safeTerm } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
+import { changeOwner, moveVessel, updateRaft } from "./actions";
 
 export const instant = false;
 
@@ -13,10 +14,18 @@ const SOURCES: Record<string, string> = {
   system: "This system",
 };
 
-export default async function RaftPage({ params }: PageProps<"/rafts/[id]">) {
+const INPUT = "w-full rounded border border-zinc-500/60 bg-transparent px-2 py-1";
+const BUTTON = "w-fit rounded bg-[#FF5200] px-3 py-1.5 font-semibold text-white";
+const REASONS = ["Sold", "Moved to another vessel", "Correction"];
+
+export default async function RaftPage({ params, searchParams }: PageProps<"/rafts/[id]">) {
   await requireStaff();
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/.test(id)) notFound();
+  const sp = await searchParams;
+  const done = typeof sp.done === "string" ? sp.done : "";
+  const failed = typeof sp.error === "string" ? sp.error : "";
+  const ownerQ = typeof sp.owner_q === "string" ? safeTerm(sp.owner_q) : "";
 
   const supabase = await createClient();
   const [{ data: a }, { data: owners }, { data: history }] = await Promise.all([
@@ -33,6 +42,26 @@ export default async function RaftPage({ params }: PageProps<"/rafts/[id]">) {
       .order("serviced_on", { ascending: false }),
   ]);
   if (!a) notFound();
+
+  // Vessels on the owner's account, for the "move" list, and customer matches for "change owner".
+  let accountId: string | null = a.customer_id;
+  for (let i = 0; accountId && i < 6; i += 1) {
+    const { data: c } = await supabase.from("customers").select("parent_id").eq("id", accountId).maybeSingle();
+    if (!c?.parent_id) break;
+    accountId = c.parent_id;
+  }
+  const { data: accountVessels } = accountId
+    ? await supabase.from("vessels").select("id, name").eq("customer_id", accountId).order("name").limit(300)
+    : { data: [] };
+  const { data: matches } = ownerQ
+    ? await supabase
+        .from("qbo_customers")
+        .select("qbo_id, fully_qualified_name, phone, email")
+        .eq("active", true)
+        .ilike("fully_qualified_name", `%${ownerQ.split(/\s+/).join("%")}%`)
+        .order("fully_qualified_name")
+        .limit(15)
+    : { data: [] };
 
   const facts: [string, string][] = [
     ["Label ID", a.system_id],
@@ -90,6 +119,17 @@ export default async function RaftPage({ params }: PageProps<"/rafts/[id]">) {
         )}
       </header>
 
+      {done ? (
+        <p role="status" className="font-semibold">
+          {done}
+        </p>
+      ) : null}
+      {failed ? (
+        <p role="alert" className="font-semibold text-red-700">
+          {failed}
+        </p>
+      ) : null}
+
       <dl className="grid grid-cols-[auto_1fr] gap-x-8 gap-y-1 text-sm">
         {facts
           .filter(([, v]) => v)
@@ -101,6 +141,145 @@ export default async function RaftPage({ params }: PageProps<"/rafts/[id]">) {
           ))}
       </dl>
 
+      <details className="rounded border border-zinc-500/40 p-4 text-sm">
+        <summary className="cursor-pointer font-semibold">Edit details</summary>
+        <form action={updateRaft} className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <input type="hidden" name="id" value={a.id} />
+          <label>
+            Serial number
+            <input name="serial_number" defaultValue={a.serial_number ?? ""} required className={INPUT} />
+          </label>
+          <label>
+            Brand
+            <input name="brand" defaultValue={a.brand ?? ""} className={INPUT} />
+          </label>
+          <label>
+            Model
+            <input name="model" defaultValue={a.model ?? ""} className={INPUT} />
+          </label>
+          <label>
+            Capacity (persons)
+            <input name="capacity" inputMode="numeric" defaultValue={a.capacity ?? ""} className={INPUT} />
+          </label>
+          <label>
+            Type
+            <input name="equipment_type" defaultValue={a.equipment_type ?? ""} className={INPUT} />
+          </label>
+          <label>
+            Manufactured
+            <input type="date" name="manufacture_date" defaultValue={a.manufacture_date ?? ""} className={INPUT} />
+          </label>
+          <label>
+            Service interval (months)
+            <input
+              name="service_interval_months"
+              inputMode="numeric"
+              defaultValue={a.service_interval_months ?? ""}
+              className={INPUT}
+            />
+          </label>
+          <label>
+            Next service due
+            <input type="date" name="next_service_due" defaultValue={a.next_service_due ?? ""} className={INPUT} />
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="is_loaner" defaultChecked={a.is_loaner} /> Loaner raft
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="lapsed" defaultChecked={a.lapsed} /> Lapsed (leave off reminders)
+          </label>
+          <button type="submit" className={`${BUTTON} sm:col-span-2`}>
+            Save details
+          </button>
+        </form>
+      </details>
+
+      <details className="rounded border border-zinc-500/40 p-4 text-sm">
+        <summary className="cursor-pointer font-semibold">Move to another vessel</summary>
+        {a.customer_id ? (
+          <form action={moveVessel} className="mt-4 flex flex-col gap-3">
+            <input type="hidden" name="id" value={a.id} />
+            <label>
+              Vessel on this customer&apos;s account
+              <select name="vessel_id" defaultValue={a.vessel_id ?? ""} className={INPUT}>
+                <option value="">No vessel</option>
+                {(accountVessels ?? []).map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Or a new vessel name
+              <input name="new_vessel" placeholder="F/V …" className={INPUT} />
+            </label>
+            <label>
+              Reason
+              <select name="reason" defaultValue="Moved to another vessel" className={INPUT}>
+                {REASONS.map((r) => (
+                  <option key={r}>{r}</option>
+                ))}
+              </select>
+            </label>
+            <button type="submit" className={BUTTON}>
+              Move raft
+            </button>
+          </form>
+        ) : (
+          <p className="mt-3">This raft has no owner yet. Use Change owner first.</p>
+        )}
+      </details>
+
+      <details open={!!ownerQ} className="rounded border border-zinc-500/40 p-4 text-sm">
+        <summary className="cursor-pointer font-semibold">Change owner</summary>
+        <form className="mt-4 flex gap-2">
+          <input
+            type="search"
+            name="owner_q"
+            defaultValue={ownerQ}
+            placeholder="Search QuickBooks customers"
+            aria-label="Search QuickBooks customers"
+            className={INPUT}
+          />
+          <button type="submit" className={BUTTON}>
+            Search
+          </button>
+        </form>
+        {ownerQ && (matches ?? []).length === 0 ? (
+          <p className="mt-3">
+            No active QuickBooks customer matches. New customers can be added once intake is built.
+          </p>
+        ) : null}
+        <ul className="mt-3 flex flex-col gap-3">
+          {(matches ?? []).map((m) => (
+            <li key={m.qbo_id} className="border-t border-zinc-500/20 pt-3">
+              <p className="font-semibold">{m.fully_qualified_name}</p>
+              <p className="opacity-75">{[m.phone, m.email].filter(Boolean).join(" · ")}</p>
+              <form action={changeOwner} className="mt-2 flex flex-wrap items-end gap-2">
+                <input type="hidden" name="id" value={a.id} />
+                <input type="hidden" name="qbo_id" value={m.qbo_id} />
+                <label>
+                  Vessel (optional)
+                  <input name="new_vessel" placeholder="F/V …" className={INPUT} />
+                </label>
+                <label>
+                  Reason
+                  <select name="reason" defaultValue="Sold" className={INPUT}>
+                    {REASONS.map((r) => (
+                      <option key={r}>{r}</option>
+                    ))}
+                  </select>
+                </label>
+                <button type="submit" className={BUTTON}>
+                  Assign to this customer
+                </button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      </details>
+
       <section>
         <h2 className="text-lg font-semibold">Ownership</h2>
         <ul className="mt-2 text-sm">
@@ -111,6 +290,7 @@ export default async function RaftPage({ params }: PageProps<"/rafts/[id]">) {
               <span className="opacity-75">
                 {" "}
                 · {formatDate(o.effective_from)} to {o.effective_to ? formatDate(o.effective_to) : "now"}
+                {o.reason && !o.reason.startsWith("Imported") ? ` · ${o.reason}` : ""}
               </span>
             </li>
           ))}

@@ -296,3 +296,48 @@ describe("QuickBooks connection", () => {
     ).rejects.toThrow(); // only ever one connected company
   });
 });
+
+describe("reassigning an asset", () => {
+  it("closes the old ownership, opens the new one, and keeps both", async () => {
+    const staff = await one<{ id: string }>(
+      `insert into staff (id, full_name, email, role) values (gen_random_uuid(), 'TRAINING Mover', 'training-move@example.test', 'user') returning id`,
+    );
+    const a = await one<{ id: string }>(`insert into customers (name) values ('TRAINING Seller') returning id`);
+    const b = await one<{ id: string }>(`insert into customers (name) values ('TRAINING New Owner') returning id`);
+    const v = await one<{ id: string }>(
+      `insert into vessels (customer_id, name) values ($1, 'F/V TRAINING TWO') returning id`,
+      [b.id],
+    );
+    const asset = await one<{ id: string }>(
+      `insert into assets (system_id, asset_type, serial_number) values ($1, 'raft', 'TRAIN-MOVE') returning id`,
+      [newSystemId()],
+    );
+    // An imported ownership dated later today, as the import writes them.
+    await db.query(
+      `insert into asset_assignments (asset_id, customer_id, effective_from) values ($1, $2, now() + interval '3 hours')`,
+      [asset.id, a.id],
+    );
+    await db.exec(`set request.jwt.claim.sub = '${staff.id}';`);
+    try {
+      await db.query(`select reassign_asset($1, $2, $3, 'Sold')`, [asset.id, b.id, v.id]);
+      const rows = (
+        await db.query<{ customer_id: string; effective_to: string | null; reason: string | null }>(
+          `select customer_id, effective_to, reason from asset_assignments where asset_id = $1 order by effective_from`,
+          [asset.id],
+        )
+      ).rows;
+      expect(rows).toHaveLength(2);
+      expect(rows[0].customer_id).toBe(a.id);
+      expect(rows[0].effective_to).not.toBeNull();
+      expect(rows[1]).toMatchObject({ customer_id: b.id, effective_to: null, reason: "Sold" });
+      // Asking for the same owner and vessel again changes nothing.
+      await db.query(`select reassign_asset($1, $2, $3, 'Sold')`, [asset.id, b.id, v.id]);
+      expect(
+        (await one<{ n: number }>(`select count(*)::int n from asset_assignments where asset_id = $1`, [asset.id])).n,
+      ).toBe(2);
+    } finally {
+      await db.exec(`reset request.jwt.claim.sub;`);
+    }
+    await expect(db.query(`select reassign_asset($1, $2, null, 'x')`, [asset.id, a.id])).rejects.toThrow(/Only staff/);
+  });
+});
