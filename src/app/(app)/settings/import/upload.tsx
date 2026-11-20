@@ -15,6 +15,8 @@ const LABELS: Record<string, string> = {
   assignments: "Ownership records",
   history: "Past services",
   part_codes: "Part scan codes",
+  assets_corrected: "Rafts with dates corrected",
+  ownership_replaced: "Rafts with ownership corrected",
 };
 
 export function ImportUpload() {

@@ -559,3 +559,45 @@ describe("certificate line", () => {
     }
   });
 });
+
+describe("import corrections", () => {
+  it("corrects imported dates and ownership but leaves alone what people changed", async () => {
+    const c1 = await one<{ id: string }>(`insert into customers (name) values ('TRAINING Corr One') returning id`);
+    const c2 = await one<{ id: string }>(`insert into customers (name) values ('TRAINING Corr Two') returning id`);
+    const mk = async (serial: string, reason: string) => {
+      const a = await one<{ id: string }>(
+        `insert into assets (system_id, asset_type, serial_number, last_serviced_on, next_service_due)
+         values ($1, 'raft', $2, '2026-10-01', '2027-10-01') returning id`,
+        [newSystemId(), serial],
+      );
+      await db.query(`insert into asset_assignments (asset_id, customer_id, reason) values ($1, $2, $3)`, [a.id, c1.id, reason]);
+      await db.query(`insert into service_history (asset_id, serviced_on, source) values ($1, '2026-10-01', 'asana')`, [a.id]);
+      return a.id;
+    };
+    const plain = await mk("TRN-CORR-1", "Imported");
+    const moved = await mk("TRN-CORR-2", "Sold");
+    const worked = await mk("TRN-CORR-3", "Imported");
+    await db.query(`insert into service_jobs (asset_id, location_id, stage) values ($1, $2, 'received')`, [worked, ids.york]);
+    await db.query(`insert into service_history (asset_id, serviced_on, source) values ($1, current_date, 'system')`, [worked]);
+
+    const fix = (id: string) => ({ id, last_serviced_on: "2026-02-10", next_service_due: "2027-02-28", lapsed: false });
+    const n = await one<{ n: number }>(`select import_apply_asset_corrections($1::jsonb) as n`, [
+      JSON.stringify([fix(plain), fix(moved), fix(worked)]),
+    ]);
+    expect(n.n).toBe(2); // the raft with a job in the system keeps its dates
+    const due = async (id: string) => (await one<{ d: string }>(`select next_service_due::text d from assets where id = $1`, [id])).d;
+    expect(await due(plain)).toBe("2027-02-28");
+    expect(await due(worked)).toBe("2027-10-01");
+
+    const cleared = (await one<{ ids: string[] }>(`select import_reset_assignments($1::uuid[]) as ids`, [[plain, moved, worked]])).ids;
+    expect(cleared).toEqual([plain]); // a raft someone reassigned, or with a job, is not touched
+    await db.query(`insert into asset_assignments (asset_id, customer_id, reason) values ($1, $2, 'Imported')`, [plain, c2.id]);
+    expect((await one<{ n: number }>(`select count(*)::int n from asset_assignments where asset_id = $1`, [moved])).n).toBe(1);
+
+    await db.query(`select import_clear_history()`);
+    const left = (await db.query<{ source: string }>(
+      `select source from service_history where asset_id = any($1::uuid[])`, [[plain, moved, worked]],
+    )).rows.map((r) => r.source);
+    expect(left).toEqual(["system"]);
+  });
+});
