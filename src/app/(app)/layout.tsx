@@ -16,12 +16,20 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
             <span className="text-[#FF5200]">Liferaft Services</span> Operations
           </Link>
           <nav className="flex gap-4 text-sm font-semibold">
+            <Link href="/rafts" className="underline">
+              Rafts
+            </Link>
             <Link href="/customers" className="underline">
               Customers
             </Link>
             <Link href="/settings/quickbooks" className="underline">
               QuickBooks
             </Link>
+            {staff.role === "admin" ? (
+              <Link href="/settings/import" className="underline">
+                Import
+              </Link>
+            ) : null}
           </nav>
         </div>
         <form action={signOut} className="flex items-center gap-3 text-sm">

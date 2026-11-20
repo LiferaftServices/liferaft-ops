@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireStaff } from "@/lib/auth";
+import { safeTerm } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
 export const instant = false;
@@ -22,8 +23,6 @@ interface Row {
 const COLUMNS =
   "qbo_id, display_name, fully_qualified_name, parent_qbo_id, level, active, phone, mobile, email, balance";
 
-// Characters that have a meaning inside a search pattern or filter expression.
-const safeTerm = (q: string) => q.replace(/[%_,()\\*"]/g, " ").trim().slice(0, 80);
 
 export default async function Customers({ searchParams }: PageProps<"/customers">) {
   await requireStaff();
@@ -121,7 +120,7 @@ export default async function Customers({ searchParams }: PageProps<"/customers"
               {rows.map((r) => (
                 <tr key={r.qbo_id} className="border-b border-zinc-500/20 align-top">
                   <td className="py-2 pr-4">
-                    <Link className="font-semibold underline" href={`/customers?under=${r.qbo_id}`}>
+                    <Link className="font-semibold underline" href={`/customers/${r.qbo_id}`}>
                       {under ? r.display_name : r.fully_qualified_name}
                     </Link>
                     {r.active ? null : <span className="ml-2 text-xs opacity-75">(inactive)</span>}
