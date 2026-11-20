@@ -88,12 +88,12 @@ export async function runImport(file: ImportFile): Promise<ImportResult> {
     (file.history ?? []).map((r) => ({ ...pick(r, HISTORY), location_id: locationId(r.location_code) })),
     true,
   );
-  // Scan codes are keyed by the code itself. Codes already known are left alone.
+  // Scan codes are keyed by the code itself. A corrected file replaces an earlier mapping.
   const codes = (file.part_codes ?? [])
     .filter((r) => typeof r.code === "string" && typeof r.part_number === "string" && r.code && r.part_number)
     .map((r) => ({ code: String(r.code).trim(), part_number: String(r.part_number).trim(), source: "import" }));
   for (let i = 0; i < codes.length; i += BATCH) {
-    const { error } = await db.from("part_codes").upsert(codes.slice(i, i + BATCH), { onConflict: "code", ignoreDuplicates: true });
+    const { error } = await db.from("part_codes").upsert(codes.slice(i, i + BATCH), { onConflict: "code" });
     if (error) throw new Error(`Loading scan codes failed: ${error.message}`);
   }
   return { customers, vessels, assets, assignments, history, part_codes: codes.length };
