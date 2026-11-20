@@ -271,12 +271,15 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
                 return (
                   <li key={j.id} className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-500/20 py-3 text-sm">
                     <div className="min-w-64 flex-1">
-                      <p>
-                        <Link className="font-semibold underline" href={`/rafts/${j.asset_id}`}>
+                      <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <Link className="py-1 text-base font-semibold underline" href={`/rafts/${j.asset_id}`}>
                           {j.serial_number ?? "No serial"}
-                        </Link>{" "}
-                        <Link className="underline" href={`/jobs/${j.id}`}>
-                          {j.job_number} parts
+                        </Link>
+                        <Link
+                          className="ml-3 rounded border border-zinc-500/60 px-3 py-1 font-semibold"
+                          href={`/jobs/${j.id}`}
+                        >
+                          {j.job_number} · parts and invoice
                         </Link>
                         {j.priority !== "normal" ? (
                           <span className={j.priority === "hot" ? "ml-2 font-semibold text-[#FF5200]" : "ml-2 font-semibold"}>
