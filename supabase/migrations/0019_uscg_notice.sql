@@ -23,5 +23,14 @@ begin
   return n;
 end;
 $$;
-revoke all on function import_set_approval_numbers(jsonb) from public, anon, authenticated;
-grant execute on function import_set_approval_numbers(jsonb) to service_role;
+do $$
+begin
+  revoke all on function import_set_approval_numbers(jsonb) from public;
+  if exists (select 1 from pg_roles where rolname = 'anon') then
+    revoke all on function import_set_approval_numbers(jsonb) from anon, authenticated;
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function import_set_approval_numbers(jsonb) to service_role;
+  end if;
+end;
+$$;
