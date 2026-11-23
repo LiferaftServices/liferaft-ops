@@ -26,16 +26,18 @@ export default async function RaftLabel({ params }: PageProps<"/rafts/[id]/label
         <Link className="underline" href={`/rafts/${id}`}>
           Back to the raft
         </Link>
-        {" · "}Print this page from the browser (Ctrl+P). Only the label prints.
+        {" · "}Print this page from the browser (Ctrl+P) to the P-touch printer with 24 mm tape loaded. Set margins to None and scale to 100%. Only the label prints.
       </p>
-      <div className="flex w-[3.5in] items-center gap-3 rounded border border-zinc-500/60 bg-white p-3 text-black print:border-0">
-        <div className="h-[1.4in] w-[1.4in] shrink-0" dangerouslySetInnerHTML={{ __html: svg }} />
-        <div className="min-w-0 text-[11px] leading-tight">
-          <p className="text-[13px] font-bold">Liferaft Services</p>
-          <p className="mt-1 font-semibold">S/N {a.serial_number ?? "none"}</p>
-          <p>{[a.brand, a.capacity ? `${a.capacity}-person` : null, a.equipment_type].filter(Boolean).join(" · ")}</p>
-          <p className="mt-1 font-mono text-[10px]">{a.system_id}</p>
-          <p className="mt-1">207-363-0220</p>
+      {/* Sized for 24 mm laminated tape (Brother TZe), which prints an 18 mm band: a 60 x 24 mm label. */}
+      <style>{`@page { size: 60mm 24mm; margin: 0 } @media print { header, nav { display: none !important } body { margin: 0 } main { padding: 0 !important; margin: 0 !important; max-width: none !important } }`}</style>
+      <div className="flex h-[24mm] w-[60mm] items-center gap-[2mm] overflow-hidden border border-zinc-500/60 bg-white px-[2mm] text-black print:border-0">
+        <div className="h-[16mm] w-[16mm] shrink-0" dangerouslySetInnerHTML={{ __html: svg }} />
+        <div className="min-w-0 text-[7pt] leading-[1.15]">
+          <p className="text-[8pt] font-bold">Liferaft Services</p>
+          <p className="font-semibold">S/N {a.serial_number ?? "none"}</p>
+          <p className="truncate">{[a.brand, a.capacity ? `${a.capacity}-person` : null].filter(Boolean).join(" · ")}</p>
+          <p className="font-mono text-[6.5pt]">{a.system_id}</p>
+          <p>207-363-0220</p>
         </div>
       </div>
       <p className="text-sm print:hidden">
