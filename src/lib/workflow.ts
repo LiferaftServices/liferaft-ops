@@ -182,7 +182,8 @@ export const SIDE_ACTIONS: readonly Action[] = [
   {
     key: "transfer",
     label: "Transfer to other shop",
-    from: ["received", "incoming"],
+    // Handled as a move to the other shop's board (see moveJob), at any point before the raft goes back out.
+    from: ["scheduled_pickup", "picked_up", "received", "incoming", "on_floor", "needs_invoice", "ready_for_delivery", "ready_for_pickup"],
     to: "transferred",
     modes: ["office"],
   },

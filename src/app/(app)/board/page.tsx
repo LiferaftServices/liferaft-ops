@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { after } from "next/server";
+import { syncCustomers, syncItems } from "@/lib/qbo/client";
 import { requireStaff } from "@/lib/auth";
 import { formatDate, isoDay } from "@/lib/format";
 import { getMode, MODE_LABELS, MODES } from "@/lib/mode";
@@ -39,6 +41,8 @@ interface Job {
   invoice_balance: number | null;
   invoice_changed: boolean;
   has_uninvoiced_items: boolean;
+  origin_location_id: string | null;
+  origin_location_name: string | null;
 }
 
 const SORTS = [
@@ -71,6 +75,24 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
   let query = supabase.from("job_board").select("*").order("date_received", { ascending: true }).limit(1000);
   if (shop !== "all") query = query.eq("location_id", shop);
   const { data, error } = await query;
+  // Rafts this shop received that are now being worked at the other shop.
+  const { data: awayData } =
+    shop !== "all"
+      ? await supabase.from("job_board").select("*").eq("origin_location_id", shop).neq("location_id", shop).order("date_received")
+      : { data: [] };
+  const away = (awayData as Job[] | null) ?? [];
+  // Keep the QuickBooks customer and item copies fresh: once a day, after this page is sent.
+  const { data: refreshDue } = await supabase.rpc("claim_qbo_auto_sync", { p_hours: 24 });
+  if (refreshDue === true) {
+    after(async () => {
+      try {
+        await syncCustomers();
+        await syncItems();
+      } catch (err) {
+        console.error("Automatic QuickBooks refresh failed", err);
+      }
+    });
+  }
   // Dates sort earliest first, with undated jobs last.
   const byDate = (key: "scheduled_start" | "scheduled_due" | "date_received") => (a: Job, b: Job) =>
     (a[key] ?? "9999").localeCompare(b[key] ?? "9999");
@@ -302,6 +324,11 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
                             {PRIORITY_LABELS[j.priority] ?? j.priority}
                           </span>
                         ) : null}
+                        {j.origin_location_id && j.origin_location_id !== j.location_id ? (
+                          <span className="ml-2 font-semibold text-[#FF5200]">
+                            Transferred in · came in at {(j.origin_location_name ?? "").replace(/\s*Raft Service$/i, "")}, goes back there
+                          </span>
+                        ) : null}
                         {j.estimate_status === "required" ? <span className="ml-2 font-semibold">Estimate wanted</span> : null}
                         {j.qbo_invoice_id ? (
                           j.payment_status === "paid" ? (
@@ -394,6 +421,26 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
           </section>
         );
       })}
+      {away.length ? (
+        <section>
+          <h2 className="text-lg font-semibold">
+            At the other shop <span className="font-normal opacity-75">({away.length})</span>
+          </h2>
+          <p className="text-sm">Received here and transferred. They come back here when finished unless arranged otherwise.</p>
+          <ul>
+            {away.map((j) => (
+              <li key={j.id} className="border-b border-zinc-500/20 py-2 text-sm">
+                <Link className="font-semibold underline" href={`/rafts/${j.asset_id}`}>
+                  {j.serial_number ?? "No serial"}
+                </Link>{" "}
+                · {j.customer_name ?? "No owner"}
+                {j.vessel_name ? ` · ${j.vessel_name}` : ""} · {j.job_number} · now {STAGE_LABELS[j.stage]} at{" "}
+                {j.location_name.replace(/\s*Raft Service$/i, "")}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </main>
   );
 }

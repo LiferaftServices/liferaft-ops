@@ -43,6 +43,19 @@ export async function moveJob(form: FormData) {
   if (["load", "deliver", "customer_collects"].includes(actionKey)) {
     await refreshPayment(supabase, jobId).catch(() => null);
   }
+  if (actionKey === "transfer") {
+    // A transfer puts the job on the other shop's board and remembers where it came in.
+    if (staff.role !== "admin" && (await getMode()) !== "office") {
+      redirect(`${back}${join}error=${encodeURIComponent("Switch to Office mode to transfer a raft.")}`);
+    }
+    const { data: shopName, error: transferError } = await supabase.rpc("transfer_job", { p_job: jobId });
+    revalidatePath("/board");
+    redirect(
+      `${back}${join}${transferError ? "error" : "done"}=${encodeURIComponent(
+        transferError ? transferError.message : `Transferred. The raft is now on the ${shopName} board.`,
+      )}`,
+    );
+  }
   if (actionKey === "invoice_for_delivery" || actionKey === "invoice_for_pickup") {
     redirect(`/jobs/${jobId}`); // invoices are approved on the job page, where the parts list is reviewed
   }
