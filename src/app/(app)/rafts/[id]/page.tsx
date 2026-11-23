@@ -4,7 +4,9 @@ import { requireStaff } from "@/lib/auth";
 import { DUE_LABELS, dueState, formatDate, isoDay, safeTerm } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { BRANDS, EQUIPMENT_TYPES, PRIORITY_LABELS, SERVICE_CLASS_LABELS } from "@/lib/raft-options";
-import { STAGE_LABELS } from "@/lib/workflow";
+import { getMode } from "@/lib/mode";
+import { availableActions, MAIN_STAGES, STAGE_LABELS, type Stage } from "@/lib/workflow";
+import { moveJob } from "../../board/actions";
 import { changeOwner, checkIn, moveVessel, updateRaft } from "./actions";
 
 export const instant = false;
@@ -21,7 +23,7 @@ const BUTTON = "w-fit rounded bg-[#FF5200] px-3 py-1.5 font-semibold text-white"
 const REASONS = ["Sold", "Moved to another vessel", "Correction"];
 
 export default async function RaftPage({ params, searchParams }: PageProps<"/rafts/[id]">) {
-  await requireStaff();
+  const staff = await requireStaff();
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/.test(id)) notFound();
   const sp = await searchParams;
@@ -116,6 +118,30 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
     locations: { name: string } | null;
   };
 
+  // What can be done with this raft right now, shown first so a scan leads straight to the next step.
+  const { data: board } = openJob
+    ? await supabase
+        .from("job_board")
+        .select("stage_before_side, estimate_status, payment_status, payment_hold_exempt, payment_hold_acknowledged")
+        .eq("id", openJob.id)
+        .maybeSingle()
+    : { data: null };
+  const steps = openJob
+    ? availableActions(
+        {
+          stage: openJob.stage,
+          stageBeforeSide: (board?.stage_before_side ?? null) as Stage | null,
+          estimateOpen: board?.estimate_status === "sent",
+          paymentStatus: (board?.payment_status ?? "not_invoiced") as "not_invoiced" | "unpaid" | "pending" | "paid",
+          customerPaymentHoldExempt: Boolean(board?.payment_hold_exempt),
+          paymentHoldAcknowledged: Boolean(board?.payment_hold_acknowledged),
+        },
+        { role: staff.role, mode: await getMode() },
+      )
+    : [];
+  const nextSteps = steps.filter((x) => (MAIN_STAGES as readonly string[]).includes(x.to));
+  const otherSteps = steps.filter((x) => !(MAIN_STAGES as readonly string[]).includes(x.to));
+
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-6 py-12">
       <header>
@@ -158,6 +184,69 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
         </p>
       ) : null}
 
+      {openJob ? (
+        <section className="rounded border-2 border-[#FF5200] p-4 text-sm">
+          <h2 className="text-base font-semibold">
+            In for service: {openJob.job_number} · {STAGE_LABELS[openJob.stage]}
+          </h2>
+          <p className="mt-1">
+            {openJob.locations?.name ?? ""} · received {formatDate(openJob.date_received)} ·{" "}
+            {PRIORITY_LABELS[openJob.priority] ?? openJob.priority}
+          </p>
+          {nextSteps.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {nextSteps.map((step) =>
+                step.key.startsWith("invoice_for_") ? null : (
+                  <form key={step.key} action={moveJob}>
+                    <input type="hidden" name="job_id" value={openJob.id} />
+                    <input type="hidden" name="action" value={step.key} />
+                    <input type="hidden" name="back" value={`/rafts/${a.id}`} />
+                    <button type="submit" className="rounded bg-[#FF5200] px-5 py-3 text-base font-semibold text-white">
+                      {step.label}
+                    </button>
+                  </form>
+                ),
+              )}
+              {nextSteps.some((step) => step.key.startsWith("invoice_for_")) ? (
+                <Link href={`/jobs/${openJob.id}`} className="rounded bg-[#FF5200] px-5 py-3 text-base font-semibold text-white">
+                  Review invoice items
+                </Link>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-2">Nothing to do at this stage in your current working mode. Switch mode on the service board.</p>
+          )}
+          {otherSteps.length ? (
+            <details className="mt-3">
+              <summary className="cursor-pointer underline">Other options</summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {otherSteps.map((step) => (
+                  <form key={step.key} action={moveJob}>
+                    <input type="hidden" name="job_id" value={openJob.id} />
+                    <input type="hidden" name="action" value={step.key} />
+                    <input type="hidden" name="back" value={`/rafts/${a.id}`} />
+                    <button type="submit" className="rounded border border-zinc-500/60 px-3 py-2">
+                      {step.label}
+                    </button>
+                  </form>
+                ))}
+              </div>
+            </details>
+          ) : null}
+          <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+            <Link className="font-semibold underline" href={`/jobs/${openJob.id}/inspection`}>
+              Inspection
+            </Link>
+            <Link className="font-semibold underline" href={`/jobs/${openJob.id}`}>
+              Parts and invoice
+            </Link>
+            <Link className="font-semibold underline" href="/board">
+              Service board
+            </Link>
+          </p>
+        </section>
+      ) : null}
+
       <dl className="grid grid-cols-[auto_1fr] gap-x-8 gap-y-1 text-sm">
         {facts
           .filter(([, v]) => v)
@@ -169,24 +258,7 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
           ))}
       </dl>
 
-      {openJob ? (
-        <section className="rounded border border-[#FF5200] p-4 text-sm">
-          <h2 className="font-semibold">In for service: {openJob.job_number}</h2>
-          <p className="mt-1">
-            {STAGE_LABELS[openJob.stage]} · {openJob.locations?.name ?? ""} · received{" "}
-            {formatDate(openJob.date_received)} · {PRIORITY_LABELS[openJob.priority] ?? openJob.priority}
-          </p>
-          <p className="mt-2">
-            <Link className="font-semibold underline" href={`/jobs/${openJob.id}`}>
-              Parts for this job
-            </Link>{" "}
-            ·{" "}
-            <Link className="font-semibold underline" href="/board">
-              Service board
-            </Link>
-          </p>
-        </section>
-      ) : (
+      {openJob ? null : (
         <details open={sp.checkin === "1"} className="rounded border border-zinc-500/40 p-4 text-sm">
           <summary className="cursor-pointer font-semibold">Check in for service</summary>
           <form action={checkIn} className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
