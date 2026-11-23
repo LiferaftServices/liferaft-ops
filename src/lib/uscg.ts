@@ -4,16 +4,21 @@ export const SERVICE_TYPES = ["Annual", "5-yr", "Annual, FS, NAP"] as const;
 export type ServiceType = (typeof SERVICE_TYPES)[number];
 
 /**
- * A starting suggestion from the raft's age: floor seam and NAP tests from the tenth year on,
- * the gas inflation test in the fifth year, otherwise an annual service. A person confirms it.
+ * A starting suggestion only; the technician makes the call. Floor seam and NAP tests from the
+ * tenth year on. Before that, the gas inflation test when about five years have passed since the
+ * last one, or since manufacture if the raft has not had one. Manufacture dates can be a year or
+ * two older than the sale date, and rafts come in early, so this is often adjusted by hand.
  */
-export function suggestServiceType(manufactureDate: string | null, today: Date = new Date()): ServiceType {
+export function suggestServiceType(manufactureDate: string | null, today: Date = new Date(), lastGi: string | null = null): ServiceType {
+  const monthsSince = (iso: string) => {
+    const d = new Date(`${iso.length === 7 ? `${iso}-15` : iso}T12:00:00`);
+    return (today.getFullYear() - d.getFullYear()) * 12 + (today.getMonth() - d.getMonth());
+  };
+  if (manufactureDate && monthsSince(manufactureDate) >= 114) return "Annual, FS, NAP"; // from six months before the tenth anniversary
+  if (lastGi) return monthsSince(lastGi) >= 54 ? "5-yr" : "Annual";
   if (!manufactureDate) return "Annual";
-  const made = new Date(`${manufactureDate}T12:00:00`);
-  const months = (today.getFullYear() - made.getFullYear()) * 12 + (today.getMonth() - made.getMonth());
-  if (months >= 114) return "Annual, FS, NAP"; // from six months before the tenth anniversary
-  if (months >= 54 && months < 66) return "5-yr";
-  return "Annual";
+  const months = monthsSince(manufactureDate);
+  return months >= 54 && months < 66 ? "5-yr" : "Annual";
 }
 
 export interface NoticeInput {

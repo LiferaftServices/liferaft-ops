@@ -25,6 +25,9 @@ describe("USCG notice", () => {
     expect(suggestServiceType("2016-10-01", today)).toBe("Annual, FS, NAP");
     expect(suggestServiceType("2010-01-01", today)).toBe("Annual, FS, NAP");
     expect(suggestServiceType(null, today)).toBe("Annual");
+    // a known last gas inflation test takes over from the manufacture date
+    expect(suggestServiceType("2019-06-01", today, "2022-05")).toBe("5-yr");
+    expect(suggestServiceType("2021-11-01", today, "2024-03")).toBe("Annual");
   });
   it("builds an email link with the copy address", () => {
     const link = mailto("a@uscg.mil", "service@survivalatsea.com", "Notice for F/V X", "Line 1\nLine 2");

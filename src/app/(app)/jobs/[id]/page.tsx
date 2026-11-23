@@ -66,7 +66,9 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
     supabase.from("locations").select("name, uscg_notice_email, uscg_notice_cc").eq("id", job.location_id).maybeSingle(),
     supabase.from("assets").select("approval_number, manufacture_date").eq("id", job.asset_id).maybeSingle(),
   ]);
-  const serviceType = (job.service_type ?? suggestServiceType(raft?.manufacture_date ?? null)) as ServiceType;
+  const { data: inspection } = await supabase.from("inspections").select("data").eq("job_id", id).maybeSingle();
+  const lastGi = ((inspection?.data ?? {}) as Record<string, string>).gi_date_of_last_gi ?? null;
+  const serviceType = (job.service_type ?? suggestServiceType(raft?.manufacture_date ?? null, new Date(), lastGi)) as ServiceType;
   const notice = buildNotice({
     shopName: shop?.name ?? "",
     vesselName: a?.vessel_name ?? null,
@@ -147,7 +149,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
           <form action={setServiceType} className="mt-3 flex flex-wrap items-end gap-2">
             <input type="hidden" name="job_id" value={id} />
             <label>
-              Service type{job.service_type ? "" : " (suggested from the raft's age; confirm it)"}
+              Service type{job.service_type ? "" : lastGi ? " (suggested from the last GI date; the technician decides)" : " (suggested from the manufacture date; the technician decides)"}
               <select name="service_type" defaultValue={serviceType} className="block rounded border border-zinc-500/60 bg-transparent px-2 py-1.5">
                 {SERVICE_TYPES.map((t) => (
                   <option key={t} value={t}>
@@ -157,7 +159,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
               </select>
             </label>
             <button type="submit" className="rounded border border-zinc-500/60 px-3 py-1.5 font-semibold">
-              Save type
+              {job.service_type ? "Change type" : "Confirm type"}
             </button>
           </form>
           <p className="mt-3">
@@ -176,7 +178,9 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
             </p>
           ) : null}
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            {shop?.uscg_notice_email ? (
+            {!job.service_type ? (
+              <span className="font-semibold text-[#FF5200]">Confirm the service type above before sending.</span>
+            ) : shop?.uscg_notice_email ? (
               <a
                 className="rounded bg-[#FF5200] px-4 py-2 font-semibold text-white"
                 href={mailto(shop.uscg_notice_email, shop.uscg_notice_cc ?? "", notice.subject, notice.body)}
