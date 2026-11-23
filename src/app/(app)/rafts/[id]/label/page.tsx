@@ -47,7 +47,8 @@ export default async function RaftLabel({ params, searchParams }: PageProps<"/ra
           <div className="flex h-[32mm] w-full items-stretch gap-[2.5mm] px-[1.5mm]">
             <div className="h-[32mm] w-[32mm] shrink-0" dangerouslySetInnerHTML={{ __html: svg }} />
             <div className="flex min-w-0 flex-1 flex-col justify-between text-[11pt] leading-none">
-              <p className="text-[13pt] font-bold">Liferaft Services</p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/lrs-logo-black.png" alt="Liferaft Services" className="h-[6.5mm] w-auto self-start" />
               <p className="text-[14pt] font-bold">{a.serial_number ?? "No serial"}</p>
               <p className="truncate">{[a.brand, a.capacity ? `${a.capacity}-person` : null].filter(Boolean).join(" · ")}</p>
               <p className="font-mono text-[10pt]">{a.system_id}</p>
@@ -60,7 +61,8 @@ export default async function RaftLabel({ params, searchParams }: PageProps<"/ra
           <div className="flex h-[18mm] w-full items-stretch gap-[1.5mm] px-[1mm]">
             <div className="h-[18mm] w-[18mm] shrink-0" dangerouslySetInnerHTML={{ __html: svg }} />
             <div className="flex min-w-0 flex-1 flex-col justify-between text-[8pt] leading-none">
-              <p className="text-[9pt] font-bold">Liferaft Services</p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/lrs-logo-black.png" alt="Liferaft Services" className="h-[4mm] w-auto self-start" />
               <p className="text-[9pt] font-bold">{a.serial_number ?? "No serial"}</p>
               <p className="truncate">{[a.brand, a.capacity ? `${a.capacity}P` : null].filter(Boolean).join(" ")}</p>
               <p className="font-mono text-[7.5pt]">{a.system_id}</p>

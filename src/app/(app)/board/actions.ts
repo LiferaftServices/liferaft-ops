@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { requireStaff } from "@/lib/auth";
 import { getMode, MODE_COOKIE, MODES } from "@/lib/mode";
 import { refreshPayment } from "@/lib/payments";
+import { PHOTO_KINDS, REQUIRED_PHOTOS } from "@/lib/photos";
 import { suggestSchedule } from "@/lib/turnaround";
 import { createClient } from "@/lib/supabase/server";
 import { checkMove, type Stage } from "@/lib/workflow";
@@ -62,6 +63,14 @@ export async function moveJob(form: FormData) {
   const { data: job } = await supabase.from("job_board").select("*").eq("id", jobId).maybeSingle();
   if (!job) redirect(`${back}${join}error=${encodeURIComponent("That job is closed or no longer exists.")}`);
 
+  if (actionKey === "complete_inspection") {
+    // The safety-check photos are taken fresh at every service and must be on this job.
+    const { data: taken } = await supabase.from("job_photos").select("kind").eq("job_id", jobId);
+    const missing = REQUIRED_PHOTOS.filter((k) => !(taken ?? []).some((p) => p.kind === k)).map((k) => PHOTO_KINDS[k].toLowerCase());
+    if (missing.length) {
+      redirect(`/jobs/${jobId}/inspection?error=${encodeURIComponent(`This service still needs its photos: ${missing.join("; ")}. Add them here, then complete the inspection.`)}`);
+    }
+  }
   const result = checkMove(
     {
       stage: job.stage as Stage,

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { requireStaff } from "@/lib/auth";
 import { signOut } from "../login/actions";
@@ -13,8 +14,12 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
       {/* On a phone: name and sign-out on the first row, the menu wrapped underneath. On a wide
           screen everything sits on one row. */}
       <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-zinc-500/40 px-4 py-3 sm:px-6">
-        <Link href="/" className="whitespace-nowrap font-semibold">
-          <span className="text-[#FF5200]">Liferaft Services</span> Operations
+        <Link href="/" className="flex items-center gap-3 whitespace-nowrap font-semibold">
+          {/* The logo keeps its own gray and orange; it sits on a white tile so it reads on a dark screen too. */}
+          <span className="rounded bg-white p-1">
+            <Image src="/lrs-logo.png" alt="Liferaft Services" width={864} height={504} priority className="h-10 w-auto" />
+          </span>
+          Operations
         </Link>
         <form action={signOut} className="flex items-center gap-3 text-sm lg:order-3">
           <span className="hidden sm:inline">

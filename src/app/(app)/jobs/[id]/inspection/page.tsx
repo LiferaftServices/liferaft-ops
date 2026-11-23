@@ -12,7 +12,8 @@ import { STAGE_LABELS, type Stage } from "@/lib/workflow";
 
 export const instant = false;
 
-export default async function InspectionPage({ params }: PageProps<"/jobs/[id]/inspection">) {
+export default async function InspectionPage({ params, searchParams }: PageProps<"/jobs/[id]/inspection">) {
+  const sp = await searchParams;
   await requireStaff();
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/.test(id)) notFound();
@@ -65,14 +66,23 @@ export default async function InspectionPage({ params }: PageProps<"/jobs/[id]/i
           {job.closed_at ? " This job is closed, so the inspection can no longer be changed." : ""}
         </p>
       </div>
+      {typeof sp.error === "string" ? (
+        <p role="alert" className="font-semibold text-red-700">
+          {sp.error}
+        </p>
+      ) : null}
       <details open={photosDone < REQUIRED_PHOTOS.length} className="rounded border border-zinc-500/40">
         <summary className="cursor-pointer px-3 py-3 text-base font-semibold">
-          Photos{" "}
+          Photos for this service ({job.job_number}){" "}
           <span className="font-normal opacity-75">
             {photosDone} of {REQUIRED_PHOTOS.length}
           </span>
         </summary>
         <div className="px-3 pb-3">
+          <p className="mb-2 text-sm">
+            These are taken new at every service. Photos from earlier services stay with those jobs and do not count
+            here. The inspection cannot be completed until all three are added.
+          </p>
           <JobPhotos jobId={id} photos={photos} kinds={["serial", "painter_op_head", "painter_raft", "other"]} canRemove={!job.closed_at} />
         </div>
       </details>

@@ -309,7 +309,7 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
           {photoJobId ? (
             <details open={photos.some((p) => p.kind === "delivery")} className="mt-3">
               <summary className="cursor-pointer font-semibold underline">
-                Photos for this job ({photos.length}), including delivery
+                Photos for this service ({photos.length}), including delivery
               </summary>
               <div className="mt-2">
                 <JobPhotos jobId={photoJobId} photos={photos} kinds={["delivery", "serial", "painter_op_head", "painter_raft", "other"]} canRemove={staff.role === "admin"} />
