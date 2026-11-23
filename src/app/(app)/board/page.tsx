@@ -6,7 +6,7 @@ import { PRIORITY_LABELS } from "@/lib/raft-options";
 import { createClient } from "@/lib/supabase/server";
 import { calculatedTurnaround, describeDays, measuredTurnaround } from "@/lib/turnaround";
 import { availableActions, MAIN_STAGES, SIDE_STAGES, STAGE_LABELS, type Stage } from "@/lib/workflow";
-import { moveJob, setMode, setSchedule, setTurnaround } from "./actions";
+import { applySuggestedSchedule, moveJob, setMode, setSchedule, setTurnaround } from "./actions";
 
 export const instant = false;
 
@@ -92,12 +92,14 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
     const mine = jobs.filter((j) => j.location_id === l.id);
     const waiting = mine.filter((j) => j.stage === "received" || j.stage === "incoming").length;
     const onFloor = mine.filter((j) => j.stage === "on_floor" || j.stage === "awaiting_estimate").length;
+    const unscheduled = mine.filter((j) => (j.stage === "received" || j.stage === "incoming") && !j.scheduled_start).length;
     const calculated =
       l.batch_size && l.batch_days
         ? calculatedTurnaround(waiting, onFloor, { batchSize: l.batch_size, batchDays: l.batch_days, handoffDays: l.handoff_days ?? 0 })
         : null;
     return {
     ...l,
+      unscheduled,
     waiting,
     onFloor,
     calculated,
@@ -193,6 +195,15 @@ export default async function Board({ searchParams }: PageProps<"/board">) {
                 ? `Last ${t.measured.count} jobs took ${describeDays(t.measured.days)} from arrival to sign-off.`
                 : "Not enough completed jobs here yet to measure."}
             </p>
+            {t.unscheduled > 0 && t.batch_size && t.batch_days && (staff.role === "admin" || mode === "office") ? (
+              <form action={applySuggestedSchedule} className="mt-2 text-sm">
+                <input type="hidden" name="location_id" value={t.id} />
+                <input type="hidden" name="back" value={here} />
+                <button type="submit" className="rounded border border-zinc-500/60 px-3 py-1.5 font-semibold">
+                  Suggest dates for {t.unscheduled} waiting {t.unscheduled === 1 ? "raft" : "rafts"} with none
+                </button>
+              </form>
+            ) : null}
             {staff.role === "admin" ? (
               <details className="mt-2 text-sm">
                 <summary className="cursor-pointer underline">Adjust</summary>

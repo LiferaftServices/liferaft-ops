@@ -58,6 +58,9 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
       .maybeSingle(),
     supabase.from("locations").select("id, name").order("name"),
   ]);
+  const { data: ownerRecord } = a?.customer_qbo_id
+    ? await supabase.from("qbo_customers").select("active").eq("qbo_id", a.customer_qbo_id).maybeSingle()
+    : { data: null };
   const [{ data: extra }, { data: events }] = await Promise.all([
     supabase.from("assets").select("approval_number").eq("id", id).maybeSingle(),
     supabase
@@ -275,6 +278,13 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
             </Link>
           </p>
         </section>
+      ) : null}
+
+      {ownerRecord && !ownerRecord.active ? (
+        <p role="alert" className="rounded border border-red-700 p-3 text-sm font-semibold">
+          This raft&apos;s owner is inactive in QuickBooks, usually because the customer was merged into another record.
+          Use Change owner below to move the raft to the surviving customer before invoicing.
+        </p>
       ) : null}
 
       {timelines.length ? (

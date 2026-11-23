@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { requireStaff } from "@/lib/auth";
 import { getMode, MODE_COOKIE, MODES } from "@/lib/mode";
 import { refreshPayment } from "@/lib/payments";
+import { suggestSchedule } from "@/lib/turnaround";
 import { createClient } from "@/lib/supabase/server";
 import { checkMove, type Stage } from "@/lib/workflow";
 
@@ -147,4 +148,35 @@ export async function setTurnaround(form: FormData) {
   if (error) redirect(`${back}${join}error=${encodeURIComponent(error.message)}`);
   revalidatePath("/board");
   redirect(`${back}${join}done=${encodeURIComponent("Turnaround updated.")}`);
+}
+
+/** Fills in suggested start and due dates for the waiting rafts in a shop that have none yet. */
+export async function applySuggestedSchedule(form: FormData) {
+  const staff = await requireStaff();
+  const { back, join } = safeBack(form);
+  const locationId = String(form.get("location_id") ?? "");
+  if (!UUID.test(locationId)) redirect(back);
+  if (staff.role !== "admin" && (await getMode()) !== "office") {
+    redirect(`${back}${join}error=${encodeURIComponent("Switch to Office mode to schedule rafts.")}`);
+  }
+  const supabase = await createClient();
+  const [{ data: shop }, { data: jobs }] = await Promise.all([
+    supabase.from("locations").select("batch_size, batch_days, handoff_days").eq("id", locationId).maybeSingle(),
+    supabase.from("job_board").select("id, stage, priority, date_received, scheduled_start").eq("location_id", locationId).in("stage", ["received", "incoming", "on_floor", "awaiting_estimate"]),
+  ]);
+  if (!shop?.batch_size || !shop.batch_days) {
+    redirect(`${back}${join}error=${encodeURIComponent("Set the batch size and days for this shop first.")}`);
+  }
+  const waiting = (jobs ?? []).filter((j) => (j.stage === "received" || j.stage === "incoming") && !j.scheduled_start);
+  const plan = suggestSchedule(
+    waiting.map((j) => ({ id: j.id, priority: j.priority, received: j.date_received })),
+    (jobs ?? []).some((j) => j.stage === "on_floor" || j.stage === "awaiting_estimate"),
+    { batchSize: shop!.batch_size, batchDays: shop!.batch_days, handoffDays: shop!.handoff_days ?? 0 },
+    new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" })),
+  );
+  for (const [id, dates] of plan) {
+    await supabase.from("service_jobs").update({ scheduled_start: dates.start, scheduled_due: dates.due }).eq("id", id).is("scheduled_start", null).is("closed_at", null);
+  }
+  revalidatePath("/board");
+  redirect(`${back}${join}done=${encodeURIComponent(`Suggested dates filled in for ${plan.size} waiting ${plan.size === 1 ? "raft" : "rafts"}. Change any of them under Schedule.`)}`);
 }

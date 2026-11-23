@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireStaff } from "@/lib/auth";
 import { missingQboSettings } from "@/lib/qbo/config";
 import { createClient } from "@/lib/supabase/server";
@@ -30,6 +31,11 @@ export default async function QuickBooksSettings({
   const missing = missingQboSettings();
 
   const supabase = await createClient();
+  const { data: relink } = await supabase
+    .from("assets_needing_relink")
+    .select("id, serial_number, customer_name, vessel_name")
+    .order("customer_name")
+    .limit(200);
   const { data } = await supabase.rpc("qbo_connection_status");
   const status = Array.isArray(data) ? data[0] : undefined;
   const isAdmin = staff.role === "admin";
@@ -118,6 +124,31 @@ export default async function QuickBooksSettings({
       ) : (
         <p>QuickBooks is not connected yet. An admin needs to connect it.</p>
       )}
+
+      <section className="text-sm">
+        <h2 className="text-lg font-semibold">Rafts whose customer is inactive in QuickBooks ({(relink ?? []).length})</h2>
+        {(relink ?? []).length ? (
+          <>
+            <p className="mt-1">
+              These customers were merged or made inactive in QuickBooks after their rafts were loaded. Open each raft
+              and use Change owner to move it to the surviving customer. Copy customers first so this list is current.
+            </p>
+            <ul className="mt-2">
+              {(relink ?? []).map((r) => (
+                <li key={r.id} className="border-b border-zinc-500/20 py-1.5">
+                  <Link className="font-semibold underline" href={`/rafts/${r.id}`}>
+                    {r.serial_number ?? "No serial"}
+                  </Link>{" "}
+                  · {r.customer_name}
+                  {r.vessel_name ? ` · ${r.vessel_name}` : ""}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <p className="mt-1">None. Every raft belongs to an active QuickBooks customer.</p>
+        )}
+      </section>
 
       <footer className="border-t border-zinc-500/40 pt-4 text-sm">
         <h2 className="font-semibold">Need help?</h2>

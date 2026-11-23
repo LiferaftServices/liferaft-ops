@@ -50,3 +50,40 @@ export function calculatedTurnaround(waiting: number, onFloor: number, shop: Sho
   // Five working days to a seven-day week.
   return Math.ceil((workingDays * 7) / 5);
 }
+
+const isWorkingDay = (d: Date) => d.getDay() !== 0 && d.getDay() !== 6;
+/** The date n working days after d (n = 0 gives d itself, moved forward to a working day). */
+export function addWorkingDays(d: Date, n: number): Date {
+  const out = new Date(d);
+  while (!isWorkingDay(out)) out.setDate(out.getDate() + 1);
+  for (let left = n; left > 0; ) {
+    out.setDate(out.getDate() + 1);
+    if (isWorkingDay(out)) left--;
+  }
+  return out;
+}
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+export interface WaitingJob {
+  id: string;
+  priority: string;
+  received: string | null;
+}
+
+/**
+ * Suggested start and due dates for the rafts waiting in a shop, filling batches in order:
+ * anything not at normal priority first, then longest-waiting first. The first batch starts
+ * when the batch on the floor now is finished, or on the next working day if the floor is empty.
+ */
+export function suggestSchedule(waiting: WaitingJob[], floorBusy: boolean, shop: ShopCapacity, today: Date): Map<string, { start: string; due: string }> {
+  const order = [...waiting].sort(
+    (a, b) => Number(a.priority === "normal") - Number(b.priority === "normal") || (a.received ?? "9999").localeCompare(b.received ?? "9999"),
+  );
+  const first = addWorkingDays(today, floorBusy ? shop.batchDays : 1);
+  const out = new Map<string, { start: string; due: string }>();
+  order.forEach((job, i) => {
+    const start = addWorkingDays(first, Math.floor(i / Math.max(1, shop.batchSize)) * shop.batchDays);
+    out.set(job.id, { start: iso(start), due: iso(addWorkingDays(start, Math.max(0, shop.batchDays - 1) + shop.handoffDays)) });
+  });
+  return out;
+}

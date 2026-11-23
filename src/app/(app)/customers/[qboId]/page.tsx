@@ -3,11 +3,13 @@ import { notFound } from "next/navigation";
 import { requireStaff } from "@/lib/auth";
 import { DUE_LABELS, dueState, formatDate } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
+import { saveCustomerSettings } from "./actions";
 
 export const instant = false;
 
-export default async function CustomerPage({ params }: PageProps<"/customers/[qboId]">) {
-  await requireStaff();
+export default async function CustomerPage({ params, searchParams }: PageProps<"/customers/[qboId]">) {
+  const staff = await requireStaff();
+  const sp = await searchParams;
   const { qboId } = await params;
   if (!/^\d+$/.test(qboId)) notFound();
 
@@ -20,7 +22,11 @@ export default async function CustomerPage({ params }: PageProps<"/customers/[qb
       .eq("parent_qbo_id", qboId)
       .order("display_name")
       .limit(500),
-    supabase.from("customers").select("id, notes").eq("qbo_customer_id", qboId).maybeSingle(),
+    supabase
+      .from("customers")
+      .select("id, notes, customer_type, no_reminders, partner_account, payment_hold_exempt")
+      .eq("qbo_customer_id", qboId)
+      .maybeSingle(),
   ]);
   if (!q) notFound();
 
@@ -62,6 +68,76 @@ export default async function CustomerPage({ params }: PageProps<"/customers/[qb
           <p className="mt-2 text-sm font-semibold">Open balance: ${Number(q.balance).toFixed(2)}</p>
         ) : null}
       </header>
+
+      {typeof sp.done === "string" ? (
+        <p role="status" className="font-semibold">
+          {sp.done}
+        </p>
+      ) : null}
+      {typeof sp.error === "string" ? (
+        <p role="alert" className="font-semibold text-red-700">
+          {sp.error}
+        </p>
+      ) : null}
+      {!q.active ? (
+        <p role="alert" className="rounded border border-red-700 p-3 text-sm font-semibold">
+          This customer is inactive in QuickBooks, usually because it was merged into another record. Move its rafts to
+          the surviving customer with Change owner on each raft.
+        </p>
+      ) : null}
+
+      <details className="rounded border border-zinc-500/40 p-4 text-sm" open={Boolean(local?.no_reminders || local?.partner_account || local?.payment_hold_exempt || local?.customer_type)}>
+        <summary className="cursor-pointer text-base font-semibold">
+          Settings in this system
+          <span className="font-normal opacity-75">
+            {" "}
+            {[
+              local?.customer_type === "seasonal" ? "Seasonal" : local?.customer_type === "full_time" ? "Full time" : local?.customer_type === "recreational" ? "Recreational" : null,
+              local?.partner_account ? "Partner account" : null,
+              local?.no_reminders ? "No reminders" : null,
+              local?.payment_hold_exempt ? "Exempt from payment hold" : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        </summary>
+        <form action={saveCustomerSettings} className="mt-3 flex flex-col gap-3">
+          <input type="hidden" name="qbo_id" value={qboId} />
+          <label className="w-fit">
+            Customer type
+            <select name="customer_type" defaultValue={local?.customer_type ?? ""} className="block rounded border border-zinc-500/60 bg-transparent px-2 py-1.5">
+              <option value="">Not set</option>
+              <option value="seasonal">Seasonal (hauls the boat for winter)</option>
+              <option value="full_time">Full time (fishes year round)</option>
+              <option value="recreational">Recreational</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="partner_account" defaultChecked={local?.partner_account ?? false} /> Partner account (a yard,
+            dealer or other service station; we deal with them, not the boat owners)
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="no_reminders" defaultChecked={local?.no_reminders ?? false} /> Do not send service reminders
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="payment_hold_exempt"
+              defaultChecked={local?.payment_hold_exempt ?? false}
+              disabled={staff.role !== "admin"}
+            />{" "}
+            Rafts may leave before the invoice is paid{staff.role !== "admin" ? " (admin only)" : ""}
+          </label>
+          <label>
+            Notes
+            <textarea name="notes" defaultValue={local?.notes ?? ""} rows={2} className="block w-full rounded border border-zinc-500/60 bg-transparent px-2 py-1" />
+          </label>
+          <button type="submit" className="w-fit rounded bg-[#FF5200] px-3 py-1.5 font-semibold text-white">
+            Save settings
+          </button>
+          <p className="opacity-75">Name, phone, email and address come from QuickBooks and are changed there.</p>
+        </form>
+      </details>
 
       <section>
         <h2 className="text-lg font-semibold">Rafts ({(rafts ?? []).length})</h2>
