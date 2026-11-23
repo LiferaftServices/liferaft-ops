@@ -8,6 +8,7 @@ import { refreshPayment } from "@/lib/payments";
 import { createQboInvoice } from "@/lib/qbo/client";
 import { discountItems } from "@/lib/discounts";
 import { buildInvoice } from "@/lib/qbo/invoice";
+import { SERVICE_TYPES } from "@/lib/uscg";
 import { createClient } from "@/lib/supabase/server";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -482,4 +483,31 @@ export async function acknowledgeHold(form: FormData) {
     .eq("id", jobId);
   revalidatePath("/board");
   redirect(jobUrl(jobId, error ? "error" : "done", error ? error.message : "Payment hold acknowledged. The raft can be released."));
+}
+
+/** Records the kind of service, which goes on the USCG notice. */
+export async function setServiceType(form: FormData) {
+  await requireStaff();
+  const jobId = String(form.get("job_id") ?? "");
+  const type = String(form.get("service_type") ?? "");
+  if (!UUID.test(jobId)) redirect("/board");
+  if (!(SERVICE_TYPES as readonly string[]).includes(type)) redirect(jobUrl(jobId, "error", "Choose a service type."));
+  const supabase = await createClient();
+  const { error } = await supabase.from("service_jobs").update({ service_type: type }).eq("id", jobId);
+  redirect(jobUrl(jobId, error ? "error" : "done", error ? error.message : "Service type saved."));
+}
+
+/** Records that the USCG notice was sent (or clears that, if it was marked by mistake). */
+export async function markNoticeSent(form: FormData) {
+  const staff = await requireStaff();
+  const jobId = String(form.get("job_id") ?? "");
+  if (!UUID.test(jobId)) redirect("/board");
+  const undo = form.get("undo") === "1";
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("service_jobs")
+    .update(undo ? { uscg_notice_sent_at: null, uscg_notice_sent_by: null } : { uscg_notice_sent_at: new Date().toISOString(), uscg_notice_sent_by: staff.id })
+    .eq("id", jobId);
+  revalidatePath("/board");
+  redirect(jobUrl(jobId, error ? "error" : "done", error ? error.message : undo ? "USCG notice marked as not sent." : "USCG notice recorded as sent."));
 }

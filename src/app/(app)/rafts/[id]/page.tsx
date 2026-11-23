@@ -56,6 +56,30 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
       .maybeSingle(),
     supabase.from("locations").select("id, name").order("name"),
   ]);
+  const [{ data: extra }, { data: events }] = await Promise.all([
+    supabase.from("assets").select("approval_number").eq("id", id).maybeSingle(),
+    supabase
+      .from("job_events")
+      .select("id, created_at, to_stage, note, job_id, service_jobs(job_number), staff:actor_id(full_name)")
+      .eq("asset_id", id)
+      .not("to_stage", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(200),
+  ]);
+  // Stage changes grouped by job, newest job first, each job's steps in the order they happened.
+  type Step = { id: number; when: string; stage: Stage; note: string | null; who: string | null };
+  const timelines: { jobId: string; jobNumber: string; steps: Step[] }[] = [];
+  for (const e of (events ?? []) as unknown as {
+    id: number; created_at: string; to_stage: Stage; note: string | null; job_id: string | null;
+    service_jobs: { job_number: string } | null; staff: { full_name: string } | null;
+  }[]) {
+    if (!e.job_id) continue;
+    let t = timelines.find((x) => x.jobId === e.job_id);
+    if (!t) timelines.push((t = { jobId: e.job_id, jobNumber: e.service_jobs?.job_number ?? "", steps: [] }));
+    t.steps.unshift({ id: e.id, when: e.created_at, stage: e.to_stage, note: e.note, who: e.staff?.full_name ?? null });
+  }
+  const stamp = (iso: string) =>
+    new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
   const openJob = job as unknown as {
     id: string;
     job_number: string;
@@ -91,6 +115,7 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
     ["Label ID", a.system_id],
     ["Brand", a.brand ?? ""],
     ["Model", a.model ?? ""],
+    ["CG approval number", extra?.approval_number ?? ""],
     ["Capacity", a.capacity ? `${a.capacity}-person` : ""],
     ["Type", a.equipment_type ?? ""],
     ["Service class", a.service_class ? SERVICE_CLASS_LABELS[a.service_class] : "Not set"],
@@ -247,6 +272,44 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
         </section>
       ) : null}
 
+      {timelines.length ? (
+        <section className="text-sm">
+          <h2 className="text-base font-semibold">
+            {openJob ? "Progress on this job" : `Last time in: ${timelines[0].jobNumber}`}
+          </h2>
+          <ol className="mt-1">
+            {timelines[0].steps.map((st) => (
+              <li key={st.id} className="flex flex-wrap gap-x-3 border-b border-zinc-500/20 py-1.5">
+                <span className="w-56 tabular-nums">{stamp(st.when)}</span>
+                <span className="font-semibold">{STAGE_LABELS[st.stage]}</span>
+                <span className="opacity-75">
+                  {[st.who, st.note].filter(Boolean).join(" · ")}
+                </span>
+              </li>
+            ))}
+          </ol>
+          {timelines.length > 1 ? (
+            <details className="mt-2">
+              <summary className="cursor-pointer underline">Earlier jobs ({timelines.length - 1})</summary>
+              {timelines.slice(1).map((t) => (
+                <div key={t.jobId} className="mt-2">
+                  <p className="font-semibold">{t.jobNumber}</p>
+                  <ol>
+                    {t.steps.map((st) => (
+                      <li key={st.id} className="flex flex-wrap gap-x-3 py-1">
+                        <span className="w-56 tabular-nums">{stamp(st.when)}</span>
+                        <span>{STAGE_LABELS[st.stage]}</span>
+                        <span className="opacity-75">{[st.who, st.note].filter(Boolean).join(" · ")}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ))}
+            </details>
+          ) : null}
+        </section>
+      ) : null}
+
       <dl className="grid grid-cols-[auto_1fr] gap-x-8 gap-y-1 text-sm">
         {facts
           .filter(([, v]) => v)
@@ -341,6 +404,10 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
           <label>
             Model
             <input name="model" defaultValue={a.model ?? ""} className={INPUT} />
+          </label>
+          <label>
+            CG approval number
+            <input name="approval_number" defaultValue={extra?.approval_number ?? ""} placeholder="160.151/121/3" className={INPUT} />
           </label>
           <label>
             Capacity (persons)

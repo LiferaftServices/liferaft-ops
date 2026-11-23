@@ -7,8 +7,9 @@ import { STAGE_LABELS, type Stage } from "@/lib/workflow";
 import { SERVICE_CLASS_LABELS } from "@/lib/raft-options";
 import { DiscountRows } from "./discounts";
 import { LinesList, type ListRow } from "./lines";
-import { acknowledgeHold, addItem, addStandard, checkPayment, createAdditionalInvoice, createInvoice } from "./actions";
+import { acknowledgeHold, addItem, addStandard, checkPayment, createAdditionalInvoice, createInvoice, markNoticeSent, setServiceType } from "./actions";
 import { discountItems } from "@/lib/discounts";
+import { buildNotice, mailto, SERVICE_TYPES, suggestServiceType, type ServiceType } from "@/lib/uscg";
 import { PartScanner } from "./scanner";
 
 export const instant = false;
@@ -26,7 +27,7 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
   const supabase = await createClient();
   const { data: job } = await supabase
     .from("service_jobs")
-    .select("id, job_number, stage, asset_id, date_received, closed_at, qbo_invoice_id, qbo_invoice_number, invoice_total, invoice_balance, payment_status, payment_checked_at, payment_hold_override_by, payment_hold_override_note, notes")
+    .select("id, job_number, stage, asset_id, date_received, closed_at, qbo_invoice_id, qbo_invoice_number, invoice_total, invoice_balance, payment_status, payment_checked_at, payment_hold_override_by, payment_hold_override_note, notes, location_id, service_type, uscg_notice_sent_at")
     .eq("id", id)
     .maybeSingle();
   if (!job) notFound();
@@ -61,6 +62,21 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
   ]
     .sort((x, y) => x.position - y.position)
     .map((row) => ({ ...row, position: undefined }));
+  const [{ data: shop }, { data: raft }] = await Promise.all([
+    supabase.from("locations").select("name, uscg_notice_email, uscg_notice_cc").eq("id", job.location_id).maybeSingle(),
+    supabase.from("assets").select("approval_number, manufacture_date").eq("id", job.asset_id).maybeSingle(),
+  ]);
+  const serviceType = (job.service_type ?? suggestServiceType(raft?.manufacture_date ?? null)) as ServiceType;
+  const notice = buildNotice({
+    shopName: shop?.name ?? "",
+    vesselName: a?.vessel_name ?? null,
+    brand: a?.brand ?? null,
+    approvalNumber: raft?.approval_number ?? null,
+    serialNumber: a?.serial_number ?? null,
+    capacity: a?.capacity ?? null,
+    manufactureDate: raft?.manufacture_date ?? null,
+    serviceType,
+  });
   const open = !job.closed_at;
   const invoiced = Boolean(job.qbo_invoice_id);
   const { data: invoices } = invoiced
@@ -118,6 +134,69 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
         <p role="alert" className="font-semibold text-red-700">
           {failed}
         </p>
+      ) : null}
+
+      {!job.closed_at ? (
+        <details open={!job.uscg_notice_sent_at && job.stage === "on_floor"} className="rounded border border-zinc-500/40 p-4 text-sm">
+          <summary className="cursor-pointer text-base font-semibold">
+            USCG notice{" "}
+            <span className={job.uscg_notice_sent_at ? "font-normal" : "font-normal text-[#FF5200]"}>
+              {job.uscg_notice_sent_at ? `sent ${formatDate(job.uscg_notice_sent_at)}` : "not sent yet"}
+            </span>
+          </summary>
+          <form action={setServiceType} className="mt-3 flex flex-wrap items-end gap-2">
+            <input type="hidden" name="job_id" value={id} />
+            <label>
+              Service type{job.service_type ? "" : " (suggested from the raft's age; confirm it)"}
+              <select name="service_type" defaultValue={serviceType} className="block rounded border border-zinc-500/60 bg-transparent px-2 py-1.5">
+                {SERVICE_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="submit" className="rounded border border-zinc-500/60 px-3 py-1.5 font-semibold">
+              Save type
+            </button>
+          </form>
+          <p className="mt-3">
+            To: <span className="font-semibold">{shop?.uscg_notice_email ?? "no address set for this shop"}</span>
+            {shop?.uscg_notice_cc ? ` · Cc: ${shop.uscg_notice_cc}` : ""}
+          </p>
+          <p className="mt-1 font-semibold">{notice.subject}</p>
+          <pre className="mt-1 whitespace-pre-wrap rounded bg-zinc-500/10 p-3 font-sans">{notice.body}</pre>
+          {notice.missing.length ? (
+            <p role="alert" className="mt-2 font-semibold text-red-700">
+              Missing: {notice.missing.join(", ")}.{" "}
+              <Link className="underline" href={`/rafts/${job.asset_id}`}>
+                Fill these in on the raft record
+              </Link>{" "}
+              before sending.
+            </p>
+          ) : null}
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            {shop?.uscg_notice_email ? (
+              <a
+                className="rounded bg-[#FF5200] px-4 py-2 font-semibold text-white"
+                href={mailto(shop.uscg_notice_email, shop.uscg_notice_cc ?? "", notice.subject, notice.body)}
+              >
+                Open notice in email
+              </a>
+            ) : null}
+            <form action={markNoticeSent}>
+              <input type="hidden" name="job_id" value={id} />
+              {job.uscg_notice_sent_at ? <input type="hidden" name="undo" value="1" /> : null}
+              <button type="submit" className="rounded border border-zinc-500/60 px-3 py-2 font-semibold">
+                {job.uscg_notice_sent_at ? "Mark as not sent" : "Mark as sent"}
+              </button>
+            </form>
+          </div>
+          <p className="mt-2 opacity-75">
+            The button opens a ready-to-send message in this computer&apos;s email program. Send it there, then mark it as
+            sent here.
+          </p>
+        </details>
       ) : null}
 
       <section>

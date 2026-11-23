@@ -15,6 +15,7 @@ const LABELS: Record<string, string> = {
   assignments: "Ownership records",
   history: "Past services",
   part_codes: "Part scan codes",
+  approval_numbers: "Approval numbers filled in",
   assets_corrected: "Rafts with dates corrected",
   ownership_replaced: "Rafts with ownership corrected",
 };

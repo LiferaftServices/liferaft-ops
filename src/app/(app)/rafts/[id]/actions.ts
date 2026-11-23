@@ -41,6 +41,7 @@ export async function updateRaft(form: FormData) {
       serial_number: serial,
       brand: orNull(text(form, "brand")),
       model: orNull(text(form, "model")),
+      approval_number: orNull(text(form, "approval_number")),
       capacity: capacity ? Number(capacity) : null,
       equipment_type: orNull(text(form, "equipment_type")),
       service_class: ["raft", "iba", "coastal"].includes(text(form, "service_class")) ? text(form, "service_class") : null,

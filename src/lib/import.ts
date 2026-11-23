@@ -15,6 +15,8 @@ export interface ImportFile {
   assignments?: Row[];
   history?: Row[];
   part_codes?: Row[];
+  /** Approval numbers from past inspections, by asset id. Never overwrites one already entered. */
+  approval_numbers?: Row[];
   /** Corrections to assets already loaded: service dates, and records to retire. */
   asset_corrections?: Row[];
   /** Replace the imported service history with the history in this file. */
@@ -30,6 +32,7 @@ export interface ImportResult {
   assignments: number;
   history: number;
   part_codes: number;
+  approval_numbers: number;
   assets_corrected: number;
   ownership_replaced: number;
 }
@@ -161,8 +164,17 @@ export async function runImport(file: ImportFile): Promise<ImportResult> {
     const { error } = await db.from("part_codes").upsert(codes.slice(i, i + BATCH), { onConflict: "code" });
     if (error) throw new Error(`Loading scan codes failed: ${error.message}`);
   }
+  const approvals = (file.approval_numbers ?? [])
+    .filter((r) => typeof r.id === "string" && ID.test(r.id) && typeof r.approval_number === "string" && r.approval_number)
+    .map((r) => ({ id: r.id, approval_number: String(r.approval_number).trim().slice(0, 40) }));
+  let approvalsSet = 0;
+  for (let i = 0; i < approvals.length; i += BATCH) {
+    const { data, error } = await db.rpc("import_set_approval_numbers", { p: approvals.slice(i, i + BATCH) });
+    if (error) throw new Error(`Loading approval numbers failed: ${error.message}`);
+    approvalsSet += Number(data ?? 0);
+  }
   return {
-    customers, vessels, assets, assignments, history, part_codes: codes.length,
+    customers, vessels, assets, assignments, history, part_codes: codes.length, approval_numbers: approvalsSet,
     assets_corrected: assetsCorrected, ownership_replaced: resetIds?.size ?? 0,
   };
 }
