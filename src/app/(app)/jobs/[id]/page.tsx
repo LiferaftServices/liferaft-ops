@@ -8,7 +8,9 @@ import { SERVICE_CLASS_LABELS } from "@/lib/raft-options";
 import { DiscountRows } from "./discounts";
 import { LinesList, type ListRow } from "./lines";
 import { acknowledgeHold, addItem, addStandard, checkPayment, createAdditionalInvoice, createInvoice, markNoticeSent, setServiceType } from "./actions";
+import { MessageLink } from "@/components/message-link";
 import { discountItems } from "@/lib/discounts";
+import { firstEmail, isTraining, MESSAGES, type MessageContext } from "@/lib/notifications";
 import { buildNotice, mailto, SERVICE_TYPES, suggestServiceType, type ServiceType } from "@/lib/uscg";
 import { PartScanner } from "./scanner";
 
@@ -79,6 +81,37 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
     manufactureDate: raft?.manufacture_date ?? null,
     serviceType,
   });
+  // Customer messages: who they go to and what they say.
+  const { data: payerId } = await supabase.rpc("invoice_qbo_customer_id", { p_asset_id: job.asset_id });
+  const { data: contact } =
+    typeof payerId === "string"
+      ? await supabase.from("qbo_customers").select("given_name, email, parent_qbo_id").eq("qbo_id", payerId).maybeSingle()
+      : { data: null };
+  const { data: parentContact } =
+    contact?.parent_qbo_id && !firstEmail(contact.email)
+      ? await supabase.from("qbo_customers").select("given_name, email").eq("qbo_id", contact.parent_qbo_id).maybeSingle()
+      : { data: null };
+  const customerEmail = firstEmail(contact?.email) ?? firstEmail(parentContact?.email);
+  const { data: raftDates } = await supabase.from("assets").select("next_service_due").eq("id", job.asset_id).maybeSingle();
+  const { data: sentMessages } = await supabase
+    .from("job_notifications")
+    .select("id, kind, recipient, created_at, staff:created_by(full_name)")
+    .eq("job_id", id)
+    .order("created_at", { ascending: false });
+  const messageContext: MessageContext = {
+    firstName: contact?.given_name ?? parentContact?.given_name ?? null,
+    vesselName: a?.vessel_name ?? null,
+    raft: [a?.brand, a?.capacity ? `${a.capacity}-person` : null, "liferaft"].filter(Boolean).join(" "),
+    serialNumber: a?.serial_number ?? null,
+    shopName: (shop?.name ?? "").replace(/\s*Raft Service$/i, "") || "York",
+    invoiceNumber: job.qbo_invoice_number ?? null,
+    balance: job.invoice_balance != null ? Number(job.invoice_balance) : null,
+    nextDue: raftDates?.next_service_due
+      ? new Date(`${raftDates.next_service_due}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+      : null,
+    turnaround: null,
+  };
+  const training = isTraining(a?.customer_name, a?.serial_number, a?.vessel_name);
   const open = !job.closed_at;
   const invoiced = Boolean(job.qbo_invoice_id);
   const { data: invoices } = invoiced
@@ -202,6 +235,70 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
           </p>
         </details>
       ) : null}
+
+      <details className="rounded border border-zinc-500/40 p-4 text-sm">
+        <summary className="cursor-pointer text-base font-semibold">
+          Customer messages{" "}
+          <span className="font-normal opacity-75">
+            {(sentMessages ?? []).length ? `${(sentMessages ?? []).length} prepared` : "none yet"}
+          </span>
+        </summary>
+        {training ? (
+          <p className="mt-3 font-semibold">This is a training record, so no customer messages can be sent from it.</p>
+        ) : !customerEmail ? (
+          <p className="mt-3">
+            There is no email address for this customer in QuickBooks. Add one there, then copy customers again on the
+            QuickBooks page.
+          </p>
+        ) : (
+          <>
+            <p className="mt-3">
+              To: <span className="font-semibold">{customerEmail}</span>. Each button opens the message in this
+              computer&apos;s email program for you to read over and send. Nothing is sent automatically.
+            </p>
+            <ul className="mt-2">
+              {[...MESSAGES]
+                .sort((x, y) => Number(y.stages.includes(job.stage)) - Number(x.stages.includes(job.stage)))
+                .map((m) => (
+                  <li key={m.key} className="border-b border-zinc-500/20 py-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="w-40 font-semibold">{m.label}</span>
+                      {m.stages.includes(job.stage) ? <span className="text-[#FF5200]">fits this stage</span> : null}
+                      <MessageLink
+                        jobId={id}
+                        kind={m.key}
+                        recipient={customerEmail}
+                        href={mailto(customerEmail, "", m.subject(messageContext), m.body(messageContext))}
+                      >
+                        Open in email
+                      </MessageLink>
+                    </div>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer underline">Preview</summary>
+                      <p className="mt-1 font-semibold">{m.subject(messageContext)}</p>
+                      <pre className="mt-1 whitespace-pre-wrap rounded bg-zinc-500/10 p-3 font-sans">{m.body(messageContext)}</pre>
+                    </details>
+                  </li>
+                ))}
+            </ul>
+          </>
+        )}
+        {(sentMessages ?? []).length ? (
+          <div className="mt-3">
+            <p className="font-semibold">Prepared so far</p>
+            <ul>
+              {(sentMessages as unknown as { id: string; kind: string; recipient: string; created_at: string; staff: { full_name: string } | null }[]).map((n) => (
+                <li key={n.id}>
+                  {new Date(n.created_at).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                  {" · "}
+                  {MESSAGES.find((m) => m.key === n.kind)?.label ?? n.kind} to {n.recipient}
+                  {n.staff?.full_name ? ` · ${n.staff.full_name}` : ""}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </details>
 
       <section>
         <h1 className="text-lg font-semibold">Parts used</h1>
