@@ -344,3 +344,48 @@ export async function fetchQboInvoice(invoiceId: string): Promise<CreatedInvoice
   const res = (await qboFetch(conn, `invoice/${encodeURIComponent(invoiceId)}`)) as { Invoice: RawInvoice };
   return toInvoice(res.Invoice, 0);
 }
+
+export interface RecordedPayment {
+  id: string;
+  amount: number;
+}
+
+/**
+ * Records a payment received (check, cash or similar) against one invoice in QuickBooks.
+ * This WRITES to QuickBooks: only call it when a person has entered the payment. No card is
+ * charged; it only records money already in hand. The payment goes to Undeposited Funds,
+ * QuickBooks' default, ready for the bank deposit. The request id stops a repeat of the same
+ * submission from recording the payment twice.
+ */
+export async function recordQboPayment(
+  input: { invoiceId: string; amount: number; date: string; method: string | null; reference: string | null; note: string },
+  requestId: string,
+): Promise<RecordedPayment> {
+  const conn = await getConnection();
+  const found = (await qboFetch(conn, `invoice/${encodeURIComponent(input.invoiceId)}`)) as {
+    Invoice: { Id: string; Balance?: number; CustomerRef: { value: string } };
+  };
+  const balance = found.Invoice.Balance ?? 0;
+  if (input.amount > balance + 0.004) {
+    throw new Error(`QuickBooks shows only $${balance.toFixed(2)} owing on this invoice.`);
+  }
+  let methodId: string | null = null;
+  if (input.method) {
+    const methods = await query<{ Id: string; Name: string }>(conn, "select Id, Name from PaymentMethod where Active = true", "PaymentMethod");
+    methodId = methods.find((m) => m.Name.toLowerCase() === input.method!.toLowerCase())?.Id ?? null;
+  }
+  const res = (await qboFetch(conn, `payment?requestid=${encodeURIComponent(requestId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      CustomerRef: { value: found.Invoice.CustomerRef.value },
+      TotalAmt: input.amount,
+      TxnDate: input.date,
+      ...(input.reference ? { PaymentRefNum: input.reference.slice(0, 21) } : {}),
+      ...(methodId ? { PaymentMethodRef: { value: methodId } } : {}),
+      PrivateNote: input.note,
+      Line: [{ Amount: input.amount, LinkedTxn: [{ TxnId: found.Invoice.Id, TxnType: "Invoice" }] }],
+    }),
+  })) as { Payment: { Id: string; TotalAmt?: number } };
+  return { id: res.Payment.Id, amount: res.Payment.TotalAmt ?? input.amount };
+}

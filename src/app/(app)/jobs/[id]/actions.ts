@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { requireStaff } from "@/lib/auth";
 import { getMode } from "@/lib/mode";
 import { refreshPayment } from "@/lib/payments";
-import { createQboInvoice } from "@/lib/qbo/client";
+import { createQboInvoice, recordQboPayment } from "@/lib/qbo/client";
 import { discountItems } from "@/lib/discounts";
 import { buildInvoice } from "@/lib/qbo/invoice";
 import { SERVICE_TYPES } from "@/lib/uscg";
@@ -510,4 +510,77 @@ export async function markNoticeSent(form: FormData) {
     .eq("id", jobId);
   revalidatePath("/board");
   redirect(jobUrl(jobId, error ? "error" : "done", error ? error.message : undo ? "USCG notice marked as not sent." : "USCG notice recorded as sent."));
+}
+
+const PAYMENT_METHODS = ["Check", "Cash", "Other"];
+
+/**
+ * Records a check, cash or other payment already received against one of the job's invoices,
+ * in QuickBooks. Nothing is charged to a card.
+ */
+export async function recordPayment(form: FormData) {
+  const staff = await requireStaff();
+  const jobId = String(form.get("job_id") ?? "");
+  if (!UUID.test(jobId)) redirect("/board");
+  const fail = (message: string): never => redirect(jobUrl(jobId, "error", message));
+  if (staff.role !== "admin" && (await getMode()) !== "office") fail("Switch to Office mode to record a payment.");
+
+  const invoiceRowId = String(form.get("invoice_row") ?? "");
+  const nonce = String(form.get("nonce") ?? "");
+  const amount = Number(String(form.get("amount") ?? "").replace(/[$,\s]/g, ""));
+  const method = String(form.get("method") ?? "");
+  const reference = String(form.get("reference") ?? "").trim().slice(0, 21);
+  const date = String(form.get("date") ?? "");
+  if (!UUID.test(invoiceRowId) || !UUID.test(nonce)) fail("That payment form was out of date. Reload the page and try again.");
+  if (!(amount > 0)) fail("Enter the amount received.");
+  if (!PAYMENT_METHODS.includes(method)) fail("Choose how it was paid.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)) fail("Enter the date the payment was received.");
+  if (form.get("confirmed") !== "on") fail("Tick the box to confirm the payment is in hand.");
+
+  const supabase = await createClient();
+  const { data: invoice } = await supabase
+    .from("job_invoices")
+    .select("id, qbo_invoice_id, doc_number, service_jobs(id, job_number, stage, asset_id, billing_customer_id)")
+    .eq("id", invoiceRowId)
+    .eq("job_id", jobId)
+    .maybeSingle();
+  if (!invoice) fail("That invoice was not found on this job.");
+  const job = (invoice as unknown as { service_jobs: { job_number: string; stage: string; asset_id: string; billing_customer_id: string | null } }).service_jobs;
+
+  let paid;
+  try {
+    paid = await recordQboPayment(
+      {
+        invoiceId: invoice!.qbo_invoice_id,
+        amount: Math.round(amount * 100) / 100,
+        date,
+        method: method === "Other" ? null : method,
+        reference: reference || null,
+        note: `Recorded in Liferaft Ops for ${job.job_number} by ${staff.fullName}`,
+      },
+      `lo-pay-${nonce}`,
+    );
+  } catch (err) {
+    fail(`QuickBooks did not record the payment: ${err instanceof Error ? err.message : "unknown error"}`);
+  }
+  const summary = `Payment recorded: $${paid!.amount.toFixed(2)} ${method.toLowerCase()}${reference ? ` ${reference}` : ""} on invoice ${invoice!.doc_number ?? ""}`;
+  await supabase.from("job_events").insert({
+    asset_id: job.asset_id,
+    job_id: jobId,
+    customer_id: job.billing_customer_id,
+    actor_id: staff.id,
+    source: "web",
+    action: "payment_recorded",
+    from_stage: job.stage,
+    to_stage: job.stage,
+    note: summary,
+  });
+  let status: string | null = null;
+  try {
+    status = await refreshPayment(supabase, jobId);
+  } catch {
+    // The payment is in QuickBooks; the balance here catches up at the next check.
+  }
+  revalidatePath("/board");
+  redirect(jobUrl(jobId, "done", `${summary}.${status === "paid" ? " The job is now paid in full." : ""}`));
 }

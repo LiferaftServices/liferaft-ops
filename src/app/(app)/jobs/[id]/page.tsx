@@ -7,7 +7,7 @@ import { STAGE_LABELS, type Stage } from "@/lib/workflow";
 import { SERVICE_CLASS_LABELS } from "@/lib/raft-options";
 import { DiscountRows } from "./discounts";
 import { LinesList, type ListRow } from "./lines";
-import { acknowledgeHold, addItem, addStandard, checkPayment, createAdditionalInvoice, createInvoice, markNoticeSent, setServiceType } from "./actions";
+import { acknowledgeHold, addItem, addStandard, checkPayment, createAdditionalInvoice, createInvoice, markNoticeSent, recordPayment, setServiceType } from "./actions";
 import { MessageLink } from "@/components/message-link";
 import { discountItems } from "@/lib/discounts";
 import { firstEmail, isTraining, MESSAGES, type MessageContext } from "@/lib/notifications";
@@ -357,6 +357,46 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
                 ) : (
                   <span className="font-semibold">Paid</span>
                 )}
+                {Number(inv.balance) > 0 && !job.closed_at ? (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer font-semibold underline">Record a check or cash payment</summary>
+                    <form action={recordPayment} className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <input type="hidden" name="job_id" value={id} />
+                      <input type="hidden" name="invoice_row" value={inv.id} />
+                      <input type="hidden" name="nonce" value={crypto.randomUUID()} />
+                      <label>
+                        Amount received
+                        <input name="amount" inputMode="decimal" defaultValue={Number(inv.balance).toFixed(2)} required className="block w-full rounded border border-zinc-500/60 bg-transparent px-2 py-1.5" />
+                      </label>
+                      <label>
+                        Paid by
+                        <select name="method" defaultValue="Check" className="block w-full rounded border border-zinc-500/60 bg-transparent px-2 py-1.5">
+                          <option>Check</option>
+                          <option>Cash</option>
+                          <option>Other</option>
+                        </select>
+                      </label>
+                      <label>
+                        Check or reference number
+                        <input name="reference" maxLength={21} className="block w-full rounded border border-zinc-500/60 bg-transparent px-2 py-1.5" />
+                      </label>
+                      <label>
+                        Date received
+                        <input type="date" name="date" defaultValue={new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" })} required className="block w-full rounded border border-zinc-500/60 bg-transparent px-2 py-1.5" />
+                      </label>
+                      <label className="col-span-2 flex items-center gap-2 font-semibold sm:col-span-4">
+                        <input type="checkbox" name="confirmed" required /> The payment is in hand
+                      </label>
+                      <button type="submit" className="col-span-2 w-fit rounded bg-[#FF5200] px-4 py-2 font-semibold text-white">
+                        Record payment in QuickBooks
+                      </button>
+                    </form>
+                    <p className="mt-1 opacity-75">
+                      This records money already received. It does not charge a card. The payment lands in Undeposited
+                      Funds in QuickBooks, ready for your bank deposit.
+                    </p>
+                  </details>
+                ) : null}
                 {inv.changed_in_qbo ? (
                   <p role="alert" className="mt-1 font-semibold text-red-700">
                     This invoice was changed in QuickBooks after it was created here. It was sent as{" "}
