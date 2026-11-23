@@ -54,8 +54,10 @@ const num = (v: Values, key: string): number | null => {
 };
 const pct = (n: number) => `${n > 0 ? "+" : ""}${n.toFixed(1)}%`;
 
-/** Largest pressure drop, in percent, that still passes. */
+/** A corrected pressure drop of this many percent or more fails; anything less passes. */
 export const MAX_DROP_PERCENT = 5;
+/** True when a percent change passes: a drop of 4.9999% passes, a drop of 5% fails. */
+export const passesDrop = (changePercent: number) => -changePercent < MAX_DROP_PERCENT - 1e-9;
 /** Pressure correction per degree C of temperature change, as on the FastField form. */
 export const MBAR_PER_DEGREE = 3.7;
 /** A temperature change larger than this means the pressure test must be restarted. */
@@ -80,7 +82,7 @@ export function correctedChange(v: Values, chamber: "top" | "bottom" | "floor"):
 const chamberResult = (chamber: "top" | "bottom" | "floor"): Computed["value"] => (v) => {
   const change = correctedChange(v, chamber);
   if (change === null) return null;
-  const pass = change >= -MAX_DROP_PERCENT;
+  const pass = passesDrop(change);
   return { text: `${pct(change)} · ${pass ? "Pass" : "FAIL"}`, warn: !pass };
 };
 
@@ -89,7 +91,7 @@ const napChange = (chamber: "top" | "bottom"): Computed["value"] => (v) => {
   const off = num(v, `nap_${chamber}_reading_off`);
   if (on === null || off === null || on <= 0) return null;
   const change = ((off - on) / on) * 100;
-  const pass = change >= -MAX_DROP_PERCENT;
+  const pass = passesDrop(change);
   return { text: `${pct(change)} · ${pass ? "Pass" : "FAIL"}`, warn: !pass };
 };
 

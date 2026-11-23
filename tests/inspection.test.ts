@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanValue, correctedChange, FIELDS, pressureCorrection, SECTIONS } from "../src/lib/inspection-form";
+import { cleanValue, correctedChange, FIELDS, passesDrop, pressureCorrection, SECTIONS } from "../src/lib/inspection-form";
 
 describe("inspection form", () => {
   it("has a unique key for every field", () => {
@@ -27,6 +27,17 @@ describe("inspection form", () => {
     const dating = SECTIONS[0].computed![0];
     expect(dating.value({ work_date: "2026-10-22", dated_as: "2026-12" })?.warn).toBeFalsy();
     expect(dating.value({ work_date: "2026-10-22", dated_as: "2027-05" })?.warn).toBe(true);
+  });
+
+  it("fails at a drop of exactly 5% and passes just under it", () => {
+    expect(passesDrop(-4.9999)).toBe(true);
+    expect(passesDrop(-5)).toBe(false);
+    expect(passesDrop(-5.2)).toBe(false);
+    expect(passesDrop(1.3)).toBe(true);
+    const top = SECTIONS.find((s) => s.key === "pressure")!.computed!.find((c) => c.label === "Top tube")!;
+    const base = { pt_room_temp_start: "19", pt_room_temp_end: "19", pt_barometer_start: "1018", pt_barometer_end: "1018", pt_top_start: "200" };
+    expect(top.value({ ...base, pt_top_end: "190" })).toMatchObject({ warn: true });
+    expect(top.value({ ...base, pt_top_end: "190.1" })).toMatchObject({ warn: false });
   });
 
   it("accepts only valid values", () => {
