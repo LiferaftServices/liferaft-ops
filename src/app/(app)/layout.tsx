@@ -28,7 +28,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
           {(
             [
               ["/board", "Board"],
-              ["/runs", "Runs"],
+              ["/deliveries", "Deliveries"],
               ["/scan", "Scan"],
               ["/inspections", "Batch grid"],
               ["/intake", "Intake"],
