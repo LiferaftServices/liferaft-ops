@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { InspectionTable } from "@/components/inspection-table";
+import { JobPhotos } from "@/components/job-photos";
+import { jobPhotos } from "@/lib/photo-data";
+import { REQUIRED_PHOTOS } from "@/lib/photos";
 import { requireStaff } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { SECTIONS, sectionProgress, type Values } from "@/lib/inspection-form";
@@ -25,6 +28,8 @@ export default async function InspectionPage({ params }: PageProps<"/jobs/[id]/i
     supabase.from("inspections").select("data, updated_at").eq("job_id", id).maybeSingle(),
   ]);
   const values = (insp?.data ?? {}) as Values;
+  const photos = await jobPhotos(supabase, id);
+  const photosDone = REQUIRED_PHOTOS.filter((k) => photos.some((p) => p.kind === k)).length;
   const title = `${a?.customer_name ?? "No owner"}${a?.vessel_name ? ` · ${a.vessel_name}` : ""}`;
   const subtitle = [a?.serial_number, a?.brand, a?.capacity ? `${a.capacity}-person` : null].filter(Boolean).join(" · ");
 
@@ -60,6 +65,17 @@ export default async function InspectionPage({ params }: PageProps<"/jobs/[id]/i
           {job.closed_at ? " This job is closed, so the inspection can no longer be changed." : ""}
         </p>
       </div>
+      <details open={photosDone < REQUIRED_PHOTOS.length} className="rounded border border-zinc-500/40">
+        <summary className="cursor-pointer px-3 py-3 text-base font-semibold">
+          Photos{" "}
+          <span className="font-normal opacity-75">
+            {photosDone} of {REQUIRED_PHOTOS.length}
+          </span>
+        </summary>
+        <div className="px-3 pb-3">
+          <JobPhotos jobId={id} photos={photos} kinds={["serial", "painter_op_head", "painter_raft", "other"]} canRemove={!job.closed_at} />
+        </div>
+      </details>
       {SECTIONS.map((s, i) => {
         const p = sectionProgress(s, values);
         return (

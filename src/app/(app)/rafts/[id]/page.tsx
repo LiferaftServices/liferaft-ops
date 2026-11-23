@@ -4,7 +4,9 @@ import { requireStaff } from "@/lib/auth";
 import { DUE_LABELS, dueState, formatDate, isoDay, safeTerm } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { BRANDS, EQUIPMENT_TYPES, PRIORITY_LABELS, SERVICE_CLASS_LABELS } from "@/lib/raft-options";
+import { JobPhotos } from "@/components/job-photos";
 import { getMode } from "@/lib/mode";
+import { jobPhotos } from "@/lib/photo-data";
 import { availableActions, MAIN_STAGES, STAGE_LABELS, type Stage } from "@/lib/workflow";
 import { moveJob } from "../../board/actions";
 import { changeOwner, checkIn, moveVessel, updateRaft } from "./actions";
@@ -78,6 +80,9 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
     if (!t) timelines.push((t = { jobId: e.job_id, jobNumber: e.service_jobs?.job_number ?? "", steps: [] }));
     t.steps.unshift({ id: e.id, when: e.created_at, stage: e.to_stage, note: e.note, who: e.staff?.full_name ?? null });
   }
+  // Photos for the job shown in the timeline: the open one, or the last one in.
+  const photoJobId = timelines[0]?.jobId ?? null;
+  const photos = photoJobId ? await jobPhotos(supabase, photoJobId) : [];
   const stamp = (iso: string) =>
     new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
   const openJob = job as unknown as {
@@ -288,6 +293,16 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
               </li>
             ))}
           </ol>
+          {photoJobId ? (
+            <details open={photos.some((p) => p.kind === "delivery")} className="mt-3">
+              <summary className="cursor-pointer font-semibold underline">
+                Photos for this job ({photos.length}), including delivery
+              </summary>
+              <div className="mt-2">
+                <JobPhotos jobId={photoJobId} photos={photos} kinds={["delivery", "serial", "painter_op_head", "painter_raft", "other"]} canRemove={staff.role === "admin"} />
+              </div>
+            </details>
+          ) : null}
           {timelines.length > 1 ? (
             <details className="mt-2">
               <summary className="cursor-pointer underline">Earlier jobs ({timelines.length - 1})</summary>
