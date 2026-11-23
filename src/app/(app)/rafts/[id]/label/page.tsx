@@ -28,7 +28,7 @@ export default async function RaftLabel({ params, searchParams }: PageProps<"/ra
         <Link className="underline" href={`/rafts/${id}`}>
           Back to the raft
         </Link>
-        {" · "}Print this page from the browser (Ctrl+P) to the P-touch printer. Pick the tape that is loaded, set margins to None and scale to 100%, and set the driver's Length to {wide ? "3.07 in (78 mm)" : "1.89 in (48 mm)"} with Trim tape after data ticked. Only the label prints.
+        {" · "}Print this page from the browser (Ctrl+P) to the P-touch printer. Pick the tape that is loaded, set margins to None and scale to 100%, and set the Length in the printer preferences to {wide ? "3.07 in (78 mm)" : "1.89 in (48 mm)"} with Trim tape after data ticked. Only the label prints.
       </p>
       <p className="flex flex-wrap gap-4 text-sm print:hidden">
         <span className="font-semibold">Tape loaded:</span>
