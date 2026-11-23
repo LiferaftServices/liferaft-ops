@@ -273,6 +273,9 @@ export default async function RaftPage({ params, searchParams }: PageProps<"/raf
             <Link className="font-semibold underline" href={`/jobs/${openJob.id}`}>
               Parts and invoice
             </Link>
+            <Link className="font-semibold underline" href={`/runs?raft=${a.id}`}>
+              Add to a pickup or delivery run
+            </Link>
             <Link className="font-semibold underline" href="/board">
               Service board
             </Link>
